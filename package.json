@@ -1,0 +1,13 @@
+{
+  "name": "webrobot-browser-extensions",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WebRobot Pipeline Designer browser extension (Chrome/Edge + Firefox, Manifest V3). Port of the VitePress demo app (DemoApp.vue): on-page selector picker + pipeline designer + run.",
+  "scripts": {
+    "build:chrome": "rm -rf dist/chrome && mkdir -p dist/chrome && cp -r src icons dist/chrome/ 2>/dev/null; cp manifest.chrome.json dist/chrome/manifest.json",
+    "build:firefox": "rm -rf dist/firefox && mkdir -p dist/firefox && cp -r src icons dist/firefox/ 2>/dev/null; cp manifest.firefox.json dist/firefox/manifest.json",
+    "build": "npm run build:chrome && npm run build:firefox",
+    "zip:chrome": "npm run build:chrome && cd dist/chrome && zip -qr ../webrobot-pipeline-designer-chrome.zip .",
+    "zip:firefox": "npm run build:firefox && cd dist/firefox && zip -qr ../webrobot-pipeline-designer-firefox.zip ."
+  }
+}

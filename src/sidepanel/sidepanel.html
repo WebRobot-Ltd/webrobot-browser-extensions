@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WebRobot Pipeline Designer</title>
+  <style>
+    body { font: 13px/1.5 system-ui, sans-serif; margin: 0; padding: 12px; }
+    h1 { font-size: 15px; margin: 0 0 8px; }
+    button { padding: 6px 12px; border: 1px solid #ccc; border-radius: 6px; background: #f6f6f6; cursor: pointer; }
+    button:hover { background: #eee; }
+    #picks { margin-top: 10px; }
+    .pick { border: 1px solid #eee; border-left: 3px solid #3b82f6; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+    code { font-size: 12px; word-break: break-all; }
+    .muted { color: #888; }
+    .note { margin-top: 14px; padding: 8px; background: #fffbe6; border: 1px solid #f0e0a0; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>WebRobot Pipeline Designer</h1>
+  <p class="muted">Skeleton — the full <code>DemoApp.vue</code> designer (stages,
+  variables, run, output) gets ported here.</p>
+
+  <button id="start">🎯 Start picking on this page</button>
+
+  <div id="picks"></div>
+
+  <div class="note">
+    <strong>Next:</strong> port <code>DemoApp.vue</code> into this panel
+    (stage editor · AI-infer · variables · <strong>Run</strong> → poll status/logs →
+    output table). API calls go through the background:
+    <code>chrome.runtime.sendMessage({__wr_cmd:'api', path:'/api/webrobot/api/demo/...'})</code>.
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
