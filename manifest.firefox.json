@@ -7,7 +7,7 @@
   "host_permissions": ["<all_urls>", "https://api.webrobot.eu/*"],
   "background": { "scripts": ["src/background/service-worker.js"] },
   "sidebar_action": {
-    "default_panel": "src/sidepanel/sidepanel.html",
+    "default_panel": "sidepanel/index.html",
     "default_title": "WebRobot Pipeline Designer"
   },
   "action": { "default_title": "WebRobot Pipeline Designer" },
