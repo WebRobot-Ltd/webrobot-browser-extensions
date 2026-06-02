@@ -212,8 +212,8 @@ function addField(i) { (pipeline.value[i]._fields ||= []).push({ selector: '', a
 function updField(i, fi, k, v) { pipeline.value[i]._fields[fi][k] = v; touch() }
 function rmField(i, fi) { pipeline.value[i]._fields.splice(fi, 1); touch() }
 function addMarketField(i, mi) { (pipeline.value[i]._markets[mi].fields ||= []).push({ selector: '', as: 'field', method: 'text' }); touch() }
-function updMarket(i, mi, k, v) { pipeline.value[i]._markets[mi][k] = v; touch() }
-function updMarketField(i, mi, fi, k, v) { pipeline.value[i]._markets[mi].fields[fi][k] = v; touch() }
+function updMarket(i, mi, k, v) { pipeline.value[i]._markets[mi][k] = v; touch(); if (k === 'rowSelector') previewMarket(i, mi) }
+function updMarketField(i, mi, fi, k, v) { pipeline.value[i]._markets[mi].fields[fi][k] = v; touch(); if (k === 'selector' || k === 'method' || k === 'as') previewMarket(i, mi) }
 function rmMarket(i, mi) { pipeline.value[i]._markets.splice(mi, 1); touch() }
 function setIntent(i, v) { pipeline.value[i]._aiIntent = v }
 function clearTrace(i) { pipeline.value[i]._trace = []; touch() }
@@ -311,7 +311,49 @@ async function inferMarket(i, mi) {
     if (Array.isArray(j.fields)) m.fields = j.fields.map(f => ({ selector: f.selector || '', as: f.as || 'field', method: f.method || 'text' }))
     if (!m.label) m.label = 'Market ' + (mi + 1)
     touch(); status.value = `Structure suggested for market ${mi + 1}.`
+    await previewMarket(i, mi)   // show the VALUES the LLM's selectors actually capture
   } catch (e) { status.value = 'AI infer failed: ' + e.message } finally { oddsInferKey.value = null }
+}
+
+// Extract a value from an element following the field `method` (text / html / attr:x / attr(x)).
+function oddsFieldValue(el, method) {
+  if (!el) return ''
+  const mth = (method || 'text').trim().toLowerCase()
+  if (mth === 'html') return (el.innerHTML || '').trim()
+  const am = mth.match(/^attr[:(]\s*([a-z0-9_-]+)\s*\)?$/i)
+  if (am) return (el.getAttribute(am[1]) || '').trim()
+  return (el.textContent || '').replace(/\s+/g, ' ').trim()
+}
+// Run rowSelector + field selectors against the market box HTML and surface the
+// captured values, so the user can sanity-check the LLM mapping at a glance.
+// Uses the HTML grabbed at pick time (m._html); for opened pipelines without it,
+// pulls the box's live outerHTML from the page.
+async function previewMarket(i, mi) {
+  const m = pipeline.value[i] && pipeline.value[i]._markets[mi]; if (!m) return
+  let html = m._html || ''
+  if (!html && (m.sectionSelector || '').trim()) {
+    try { html = await pageHtml(m.sectionSelector); if (html) m._html = html } catch (_) {}
+  }
+  if (!html) { m._preview = null; touch(); return }
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const box = doc.body.firstElementChild || doc.body
+    const rowSel = (m.rowSelector || '').trim()
+    let rows = []
+    try { rows = rowSel ? Array.from(box.querySelectorAll(rowSel)) : [box] } catch (_) { rows = [] }
+    const fields = (m.fields || []).filter(f => (f.selector || '').trim())
+    const cols = fields.map(f => f.as || 'field')
+    const sample = rows.slice(0, 5).map(r => {
+      const rec = {}
+      for (const f of fields) {
+        let el = null; try { el = r.querySelector(f.selector) } catch (_) {}
+        rec[f.as || 'field'] = oddsFieldValue(el, f.method)
+      }
+      return rec
+    })
+    m._preview = { count: rows.length, cols, rows: sample }
+  } catch (_) { m._preview = null }
+  touch()
 }
 
 async function handlePick(p) {
@@ -803,7 +845,18 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
                   <td><input :value="f.selector" @input="updMarketField(i,mi,fi,'selector',$event.target.value)" placeholder="selector"/></td>
                 </tr>
               </table>
-              <button @click="addMarketField(i,mi)">+ field</button>
+              <div class="mfoot">
+                <button @click="addMarketField(i,mi)">+ field</button>
+                <button @click="previewMarket(i,mi)" title="show values captured by the current selectors">👁 Preview values</button>
+              </div>
+              <div v-if="m._preview" class="oddsprev">
+                <div class="muted small">▸ {{ m._preview.count }} row(s) matched in this box</div>
+                <table v-if="m._preview.rows.length" class="ftab oddsprevtab">
+                  <tr><th v-for="c in m._preview.cols" :key="c">{{ c }}</th></tr>
+                  <tr v-for="(r,ri) in m._preview.rows" :key="ri"><td v-for="c in m._preview.cols" :key="c">{{ r[c] || '∅' }}</td></tr>
+                </table>
+                <div v-else class="warn small">selectors matched no values in this box — adjust row/field selectors</div>
+              </div>
             </div>
           </template>
 
@@ -1010,6 +1063,11 @@ button.rec:hover { background: linear-gradient(180deg,#fdb9bf,#f98a92); }
 .market { border: 1px solid #eee; border-left: 3px solid #f59e0b; border-radius: 6px; padding: 6px; margin: 4px 0; }
 .market.off { opacity: .5; } .market > input { width: 100%; margin: 2px 0; }
 .mhead { display: flex; gap: 4px; align-items: center; } .mhead input:not([type=checkbox]) { flex: 1; }
+.mfoot { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.oddsprev { margin-top: 6px; background: #f7f8fc; border: 1px solid #e6e8ef; border-radius: 6px; padding: 6px; }
+.oddsprevtab { font-size: 11px; }
+.oddsprevtab th { color: #6b7280; font-weight: 600; border-bottom: 1px solid #e6e8ef; text-align: left; padding: 1px 4px; }
+.oddsprevtab td { padding: 1px 4px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings { background: #f7f8fc; border: 1px solid #e6e8ef; border-radius: 8px; padding: 8px; margin: 8px 0; }
 .settings label { margin-right: 12px; }
 .warn { color: #92400e; background: #fef3c7; border-radius: 6px; padding: 6px; margin: 6px 0 0; font-size: 12px; }
