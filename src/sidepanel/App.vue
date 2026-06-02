@@ -98,9 +98,34 @@ async function deactivatePicker() {
   pt.value = null
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+// Link-following stages: their main selector matches a repeating LINK — like a
+// flatSelect segment, we highlight ALL matches so the user sees the set.
+const LINK_STAGES = new Set(['explore', 'join', 'visitExplore', 'wgetExplore', 'visitJoin', 'wgetJoin'])
+function isHighlightArg(row, name) {
+  return (row.stage_name === 'flatSelect' && name === segArgName(row)) ||
+         (LINK_STAGES.has(row.stage_name) && /selector/i.test(name))
+}
+// Tell the picker to outline every match of `sel` (+ row badges). Same channel
+// flatSelect uses in the demo app (paintRowNumbers).
+async function sendMultiConfig(sel) { try { await sendToPicker(pickTab, { type: 'webrobot-picker-multi-config', containerSelector: sel || null }) } catch (_) {} }
 const pickArg = (i, name) => beginPick({ stageIdx: i, kind: 'arg', argName: name }, 'selector-single')
 const pickArgList = (i, name) => beginPick({ stageIdx: i, kind: 'arg', argName: name }, 'multi-sample')
-const pickFields = (i) => beginPick({ stageIdx: i, kind: 'field-multi' }, 'multi-field')
+async function pickFields(i) {
+  await beginPick({ stageIdx: i, kind: 'field-multi' }, 'multi-field')
+  // flatSelect: scope fields to the segment + highlight ALL rows (badges).
+  const row = pipeline.value[i]
+  if (row.stage_name === 'flatSelect') await sendMultiConfig(row.args[segArgName(row)] || null)
+}
+// Clear current selections/highlights on the page (when the user mis-picks).
+async function clearSelections() {
+  try { await sendToPicker(pickTab, { type: 'webrobot-picker-multi-clear' }) } catch (_) {}
+  try { await sendToPicker(pickTab, { type: 'webrobot-highlight-clear' }) } catch (_) {}
+  await sendMultiConfig(null)
+  try { await highlight([]) } catch (_) {}   // wipe background outlines
+  testCounts.value = null
+  await deactivatePicker()
+  status.value = 'Selections cleared.'
+}
 const pickRowLca = (i, name) => beginPick({ stageIdx: i, kind: 'arg', argName: name }, 'selector-single')
 const pickMarketBox = (i) => beginPick({ stageIdx: i, kind: 'market-box' }, 'selector-single')
 const pickMacroBox = (i) => beginPick({ stageIdx: i, kind: 'macro-box' }, 'selector-single')
@@ -162,9 +187,16 @@ async function handlePick(p) {
   if (p.type === 'webrobot-pick-selector') {
     if (t.kind === 'market-box') { await appendMarket(t.stageIdx, p.selector, p.sampleHtmlFull || p.sampleHtml || ''); await deactivatePicker(); return }
     if (t.kind === 'macro-box') { row._aiBox = { selector: p.selector, html: p.sampleHtmlFull || p.sampleHtml || '' }; touch(); status.value = '📦 Content box set — describe fields then 🪄.'; await deactivatePicker(); return }
-    if (t.kind === 'arg') { updateArg(t.stageIdx, t.argName, p.selector); status.value = `${t.argName} = ${p.selector}` + (p.matches != null ? ` (${p.matches})` : ''); await deactivatePicker() }
+    if (t.kind === 'arg') {
+      updateArg(t.stageIdx, t.argName, p.selector)
+      status.value = `${t.argName} = ${p.selector}` + (p.matches != null ? ` (${p.matches})` : '')
+      // flatSelect segment / explore-join link → highlight ALL matches (rows/
+      // links) so the user sees the set; keep the picker active for that.
+      if (isHighlightArg(row, t.argName)) await sendMultiConfig(p.selector)
+      else await deactivatePicker()
+    }
   } else if (p.type === 'webrobot-pick-multi-sample') {
-    if (t.kind === 'arg') { updateArg(t.stageIdx, t.argName, p.selector); status.value = `${t.argName} = ${p.selector} (${p.matches || '?'} matches)`; await deactivatePicker() }
+    if (t.kind === 'arg') { updateArg(t.stageIdx, t.argName, p.selector); status.value = `${t.argName} = ${p.selector} (${p.matches || '?'} matches)`; if (isHighlightArg(row, t.argName)) await sendMultiConfig(p.selector); else await deactivatePicker() }
   } else if (p.type === 'webrobot-pick-multi-field') {
     if (t.kind !== 'field-multi') return
     const fields = (row._fields ||= []); const sel = (p.selector || '').trim()
@@ -385,6 +417,7 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
         <button :class="{active: mode==='prod'}" @click="mode='prod'" title="Subscription / BYOC plans — coming soon">Production 🔒</button>
       </span>
       <button @click="loadCatalog" :disabled="loadingCatalog">↻ Stages</button>
+      <button @click="clearSelections" title="Clear page highlights / picker selection (if you mis-picked)">✕ Clear</button>
     </div>
     <p v-if="mode==='demo'" class="muted small">Demo sandbox — public endpoint, no key needed (auto-auth).</p>
     <div v-else class="cs">
