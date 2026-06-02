@@ -239,6 +239,8 @@
     // normally (and Replay can drive it). Clears banner + hover highlight.
     if (d.type === 'webrobot-picker-mode' && d.mode === 'off') {
       pickerActive = false;
+      actions = [];                 // reset recording buffer for the next session
+      try { lcaFirst = null; } catch (_) {}
       try { if (typeof clearHover === 'function') clearHover(); } catch (_) {}
       try { if (banner) banner.style.display = 'none'; } catch (_) {}
       return;

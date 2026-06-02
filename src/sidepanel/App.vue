@@ -83,6 +83,7 @@ function rmTrace(i, ai) { pipeline.value[i]._trace.splice(ai, 1); touch() }
 // ── picker binding ──
 const pt = ref(null)             // { stageIdx, kind, argName }
 const recording = ref(null)      // stageIdx currently recording a trace
+const traceStage = ref(null)     // stage to route webrobot-pick-actions to (survives pt reset)
 let pickTab = null, stopPick = null
 const oddsInferKey = ref(null), aiBusy = ref(false)
 
@@ -103,8 +104,14 @@ const pickFields = (i) => beginPick({ stageIdx: i, kind: 'field-multi' }, 'multi
 const pickRowLca = (i, name) => beginPick({ stageIdx: i, kind: 'arg', argName: name }, 'selector-single')
 const pickMarketBox = (i) => beginPick({ stageIdx: i, kind: 'market-box' }, 'selector-single')
 const pickMacroBox = (i) => beginPick({ stageIdx: i, kind: 'macro-box' }, 'selector-single')
-async function recordTrace(i) { recording.value = i; await beginPick({ stageIdx: i, kind: 'trace' }, 'action-record') }
-async function stopRecord(i) { await sendToPicker(pickTab, { type: 'webrobot-picker-stop-recording' }); recording.value = null; await sleep(150); await deactivatePicker(); status.value = 'Recording stopped.' }
+async function recordTrace(i) { recording.value = i; traceStage.value = i; pipeline.value[i]._trace = []; touch(); await beginPick({ stageIdx: i, kind: 'trace' }, 'action-record') }
+async function stopRecord(i) {
+  await sendToPicker(pickTab, { type: 'webrobot-picker-stop-recording' }) // → emits webrobot-pick-actions
+  recording.value = null
+  await sleep(300)                 // let pick-actions round-trip back before we deactivate
+  await deactivatePicker()         // pt reset is safe — trace routes via traceStage
+  status.value = 'Recording stopped — trace ready (▶ Replay available).'
+}
 
 async function useCurrentUrl(i, name) {
   try { const u = await currentUrl(); if (u) { updateArg(i, name, u); status.value = 'URL: ' + u } }
@@ -138,13 +145,19 @@ async function handlePick(p) {
     return
   }
   if (p.type === 'webrobot-picker-multi-warn') { status.value = p.warn || 'click outside segment'; return }
+  // Trace recording result — routed via traceStage (survives pt reset), so it
+  // lands even after Stop deactivated the picker. MUST be before the pt guard.
+  if (p.type === 'webrobot-pick-actions') {
+    const i = traceStage.value
+    if (i != null && pipeline.value[i] && Array.isArray(p.actions)) {
+      pipeline.value[i]._trace = p.actions.slice(); touch()
+      status.value = `Recorded ${p.actions.length} action(s) → trace.`
+    }
+    return
+  }
   const t = pt.value; if (!t) return
   const row = pipeline.value[t.stageIdx]; if (!row) return
 
-  if (p.type === 'webrobot-pick-actions') {                  // explicit trace recording
-    if (Array.isArray(p.actions)) { row._trace = p.actions.slice(); touch(); status.value = `Recorded ${p.actions.length} action(s) → trace.` }
-    return
-  }
   if (p.type === 'webrobot-pick-selector') {
     if (t.kind === 'market-box') { await appendMarket(t.stageIdx, p.selector, p.sampleHtmlFull || p.sampleHtml || ''); await deactivatePicker(); return }
     if (t.kind === 'macro-box') { row._aiBox = { selector: p.selector, html: p.sampleHtmlFull || p.sampleHtml || '' }; touch(); status.value = '📦 Content box set — describe fields then 🪄.'; await deactivatePicker(); return }
