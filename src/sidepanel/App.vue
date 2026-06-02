@@ -105,7 +105,10 @@ async function deactivatePicker() {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 // Link-following stages: their main selector matches a repeating LINK — like a
 // flatSelect segment, we highlight ALL matches so the user sees the set.
-const LINK_STAGES = new Set(['explore', 'join', 'visitExplore', 'wgetExplore', 'visitJoin', 'wgetJoin'])
+const LINK_STAGES = new Set([
+  'explore', 'join', 'visitExplore', 'visitJoin', 'wgetExplore', 'wgetJoin',
+  'wget_explore', 'wget_join', 'intelligent_explore', 'intelligent_join', 'intelligentJoin',
+])
 function isHighlightArg(row, name) {
   return (row.stage_name === 'flatSelect' && name === segArgName(row)) ||
          (LINK_STAGES.has(row.stage_name) && /selector/i.test(name))
