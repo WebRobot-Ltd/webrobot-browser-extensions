@@ -25,13 +25,21 @@ export async function post(path, payload) {
   return r.body;
 }
 
-// ── domain calls (subset for slice 1; grows as DemoApp.vue ports over) ──
-export const catalogStages   = ()            => get('/demo/catalog/stages');
-export const inferSegment     = (body)        => post('/demo/wizard/infer-segment', body);
-export const inferFields      = (body)        => post('/demo/wizard/infer-fields', body);
-export const inferBodySelector= (body)        => post('/demo/wizard/infer-body-selector', body);
-export const executeDemo      = (name, body)  => post(`/demo/execute/${encodeURIComponent(name)}`, body);
-export const executionStatus  = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/status`);
+// ── domain calls (ported from DemoApp.vue, same endpoints) ──
+export const catalogStages    = ()            => get('/demo/catalog/stages');
+export const inferSegment      = (body)        => post('/demo/wizard/infer-segment', body);
+export const inferFields       = (body)        => post('/demo/wizard/infer-fields', body);
+export const inferBodySelector = (body)        => post('/demo/wizard/infer-body-selector', body);
+export const inferOddsStructure= (body)        => post('/demo/wizard/infer-odds-structure', body);
+export const relaxSelectors    = (body)        => post('/demo/wizard/relax-selectors', body);
+export const suggestFieldNames = (body)        => post('/demo/wizard/suggest-field-names', body);
+export const validatePipeline  = (body)        => post('/demo/wizard/validate', body);
+// Run: create/update + execute in one call (Save & Run), then poll status/logs/output.
+export const generatePipeline  = (body)        => post('/demo/generate-pipeline', body);
+export const executeDemo       = (name, body)  => post(`/demo/execute/${encodeURIComponent(name)}`, body);
+export const executionStatus   = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/status`);
+export const executionLogs     = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/logs`);
+export const executionOutput   = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/output`);
 
 // ── token (auth) helpers ──
 export async function setToken(token) { await ext.storage.local.set({ token }); }
@@ -49,6 +57,12 @@ export async function startPicker(mode = 'selector-single') {
   if (!r?.ok) throw new Error(r?.error || 'inject failed');
   await ext.runtime.sendMessage({ __wr_cmd: 'to-picker', tabId, payload: { type: 'webrobot-picker-mode', mode } });
   return tabId;
+}
+/** Send a message INTO the picker (highlight, mode, generalize-result, …). */
+export async function sendToPicker(tabId, payload) {
+  const id = tabId ?? await activeTabId();
+  if (id == null) return;
+  await ext.runtime.sendMessage({ __wr_cmd: 'to-picker', tabId: id, payload });
 }
 /** Subscribe to picker events forwarded by the background. Returns an unsubscribe fn. */
 export function onPick(handler) {

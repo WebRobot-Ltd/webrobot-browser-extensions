@@ -87,6 +87,12 @@
   var multiSampleSelector = null;   // last computed { selector, matches }
   var lastGeneralizeSeed = null;    // seed pending an AI-generalize reply
   var multiSampleStyleEl = null;    // injected <style> for highlight classes
+
+  // ── ROW-LCA mode: define a row that spans two separate parts (e.g. the
+  //    avatar block + the comment body) by clicking BOTH; we take their lowest
+  //    common ancestor as the repeating row container. ──
+  var lcaFirst = null;              // first clicked element (awaiting the second)
+  var lcaHighlighted = [];          // temp highlight nodes to clear on reset
   // ANTI-BOT-RECORD mode: when toggled, action-record captures EVERY raw
   // mouse/key/wheel/scroll event with high-resolution timestamps so the
   // executor can replay them pixel-perfect via page.mouse.move/down/up +
@@ -167,6 +173,9 @@
         ? ' → <strong>' + multiSampleSelector.matches + ' matches</strong>'
         : '';
       bannerMode.innerHTML = 'Samples: <strong>' + multiSampleNodes.length + '</strong>' + matchesPart;
+    } else if (mode === 'row-lca') {
+      bannerText.innerHTML = '🧩 <strong>Row by 2 clicks:</strong> click the FIRST part of one row (e.g. the avatar), then the SECOND (e.g. the text) — their common container becomes the repeating row.';
+      bannerMode.innerHTML = 'Mode: <strong>row (2 clicks → container)</strong>';
     } else {
       bannerText.innerHTML = '🎯 <strong>Selector picker:</strong> hover to highlight, click to pick. ESC to cancel.';
       bannerMode.innerHTML = 'Mode: <strong>single element</strong>';
@@ -224,7 +233,7 @@
     if (d.type === 'webrobot-picker-mode' &&
         (d.mode === 'selector-single' || d.mode === 'selector-list' ||
          d.mode === 'action-record'   || d.mode === 'multi-field' ||
-         d.mode === 'multi-sample')) {
+         d.mode === 'multi-sample'    || d.mode === 'row-lca')) {
       mode = d.mode;
       // Host tells us whether this stage FOLLOWS a link (explore/join/
       // visitExplore) so picks climb to the <a href>. Only update when the
@@ -252,6 +261,11 @@
         clearMultiSampleHighlights();
         multiSampleNodes = [];
         multiSampleSelector = null;
+      }
+      if (mode !== 'row-lca') {
+        lcaHighlighted.forEach(function (n) { try { n.style.outline = ''; n.style.background = ''; } catch (_) {} });
+        lcaHighlighted = [];
+        lcaFirst = null;
       }
       refreshBanner();
     } else if (d.type === 'webrobot-generalize-result') {
@@ -375,6 +389,23 @@
       send({ type: 'webrobot-pick-actions', actions: actions });
     } else if (d.type === 'webrobot-highlight') {
       applyHighlights(d.layers || []);
+    } else if (d.type === 'webrobot-picker-sample-fields') {
+      // Parent (after LLM auto-suggest) wants the VALUE each suggested selector
+      // resolves to ON THIS PAGE — the LLM returns selectors, not values, so the
+      // field list shows no sample. Resolve each selector and send back text +
+      // html. Also feeds multi-page consolidation (one sample per visited page).
+      var sels = Array.isArray(d.selectors) ? d.selectors : [];
+      var fsamples = sels.map(function (sel) {
+        var el = null;
+        try { el = document.querySelector(sel); } catch (_) {}
+        return {
+          selector: sel,
+          matched: !!el,
+          text: el ? (el.innerText || el.textContent || '').trim().slice(0, 200) : null,
+          html: el ? (el.outerHTML || '').slice(0, 2000) : null,
+        };
+      });
+      send({ type: 'webrobot-picker-field-samples', samples: fsamples });
     } else if (d.type === 'webrobot-highlight-clear') {
       clearHighlights();
     } else if (d.type === 'webrobot-picker-block') {
@@ -576,6 +607,38 @@
     // away because the challenge widget eats the click itself.
     if (blockInfo) return;
 
+    if (mode === 'row-lca') {
+      // Two-click row definition: click two separate parts of ONE row (e.g. the
+      // avatar block + the comment body); their lowest common ancestor is the
+      // repeating row container. Solves rows that aren't a single clickable box.
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      var clk = e.target;
+      if (!lcaFirst) {
+        lcaFirst = clk;
+        try { clk.style.outline = '3px solid #6366f1'; clk.style.background = '#6366f122'; } catch (_) {}
+        lcaHighlighted = [clk];
+        if (bannerText) bannerText.innerHTML = '🧩 <strong>Row by 2 clicks:</strong> first part captured — now click the OTHER part of the SAME row.';
+        return;
+      }
+      var lca = commonAncestor(lcaFirst, clk);
+      lcaHighlighted.forEach(function (n) { try { n.style.outline = ''; n.style.background = ''; } catch (_) {} });
+      lcaHighlighted = [];
+      lcaFirst = null;
+      if (!lca || lca === document.body || lca === document.documentElement) {
+        if (bannerText) bannerText.innerHTML = '🧩 No common row container — click two parts of the SAME row (closer together).';
+        return;
+      }
+      var lsel = computeSelector(lca, 'list');
+      var lmatches = 0; try { lmatches = document.querySelectorAll(lsel).length; } catch (_) {}
+      try { lca.style.outline = '3px solid #43a047'; lca.style.background = '#43a04722'; } catch (_) {}
+      send({ type: 'webrobot-pick-selector', selector: lsel, mode: 'row-lca', matches: lmatches,
+             sampleText: (lca.innerText || lca.textContent || '').trim().slice(0, 200),
+             sampleHtml: (lca.outerHTML || '').slice(0, 400),
+             sampleHtmlFull: (lca.outerHTML || '').slice(0, 12000) });
+      refreshBanner();
+      return;
+    }
+
     if (mode === 'action-record') {
       // Two sub-modes, decided by what the user just clicked:
       //   editable target (input/textarea/contenteditable) → STAGE only.
@@ -654,6 +717,7 @@
       var picked = e.target;
       var relSel = null;
       var containerNode = null;
+      var isParallelField = false;   // set when the field is OUTSIDE the segment (split row → parallelSelect)
       console.debug('[picker.js] multi-field click — multiContainerSelector=',
                     multiContainerSelector, 'picked=', picked && picked.tagName,
                     'pickedClasses=', picked && picked.className);
@@ -671,12 +735,14 @@
           containerNode = picked.closest(multiContainerSelector);
         } catch (_) {}
         if (!containerNode) {
-          // Outside any container — give the user a visible nudge instead
-          // of silently picking something the runtime won't reach.
-          send({ type: 'webrobot-picker-multi-warn',
-            warn: 'Click inside a container matching: ' + multiContainerSelector });
-          return;
-        }
+          // Field OUTSIDE the segment → SPLIT row (parallel sibling list with
+          // no common per-row wrapper, e.g. an avatar block + the comment body).
+          // Capture it PAGE-ROOTED + flag parallel; the host generator then
+          // emits parallelSelect (cardinality join, zipped by index) instead of
+          // flatSelect — the user never had to choose the stage.
+          relSel = computeSelector(picked, 'list');
+          isParallelField = true;
+        } else {
         // GENERIC-FIRST: start with a class-pattern relative selector
         // that should already match the same logical column in every
         // row, no second-click needed.  If the result overshoots
@@ -709,6 +775,7 @@
             console.debug('[picker.js] auto-relax:', relSel, '→', relaxed);
             relSel = relaxed;
           }
+        }
         }
       } else {
         relSel = computeSelector(picked, 'single');
@@ -850,7 +917,7 @@
         try { prevOutlines.set(n, fieldOutline); } catch (_) {}
       });
       var entry = { selector: relSel, sampleText: sampleText, sampleHtml: sampleHtml, color: color,
-                    node: picked, nodes: highlightNodes };
+                    node: picked, nodes: highlightNodes, parallel: isParallelField };
       multiFields.push(entry);
       refreshBanner();
       // Tell the parent — strip the node reference (non-serializable).
@@ -868,6 +935,7 @@
         sampleText: entry.sampleText,
         sampleHtml: entry.sampleHtml,
         color: entry.color,
+        parallel: entry.parallel,
         containerSelector: multiContainerSelector,
         matches: highlightNodes.length,
         attributes: elementAttrNames(picked),
@@ -1215,6 +1283,17 @@
 
   // List mode:   skip :nth-of-type so the same selector catches every
   //              sibling (cards, rows, items).
+  // Lowest common ancestor of two elements (or null). Used by row-lca mode to
+  // find the repeating row container that wraps two separately-clicked parts.
+  function commonAncestor(a, b) {
+    var anc = [];
+    var n = a;
+    while (n && n.nodeType === 1) { anc.push(n); n = n.parentElement; }
+    n = b;
+    while (n && n.nodeType === 1) { if (anc.indexOf(n) !== -1) return n; n = n.parentElement; }
+    return null;
+  }
+
   function computeSelector(el, selMode) {
     if (!el || el === document.body || el === document.documentElement) {
       return el && el.tagName ? el.tagName.toLowerCase() : 'body';
