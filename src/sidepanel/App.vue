@@ -1,7 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import yaml from 'js-yaml'
 import {
-  catalogStages, getToken, setToken, startPicker, onPick, sendToPicker,
+  catalogStages, listPipelines, getToken, setToken, startPicker, onPick, sendToPicker,
   inferSegment, inferSelector, inferFields, inferOddsStructure, suggestFieldNames,
   relaxSelectors, validatePipeline, saveGeneratedPipeline, executeByName, uploadCsv,
   executionStatus, executionLogs, executionOutput, currentUrl, pageHtml,
@@ -55,6 +56,81 @@ function addStage(s) { pipeline.value.push({ stage_name: s.stage_name, args: {},
 function removeStage(i) { pipeline.value.splice(i, 1) }
 function moveStage(i, d) { const j = i + d; if (j < 0 || j >= pipeline.value.length) return; const a = pipeline.value;[a[i], a[j]] = [a[j], a[i]]; pipeline.value = [...a] }
 const touch = () => { pipeline.value = [...pipeline.value] }
+// ── existing pipelines (open + edit) ──
+const existingList = ref([])
+const existingSel = ref('')
+async function loadExisting() {
+  try { const j = await listPipelines(); existingList.value = (j && j.demos) || [] }
+  catch (e) { status.value = 'List error: ' + e.message }
+}
+function openExisting(name) {
+  const d = existingList.value.find(x => x.pipeline_name === name)
+  if (!d) return
+  const rows = parseYamlToPipeline(d.pipeline_yaml || '')
+  if (!rows) return
+  pipeline.value = rows
+  wizName.value = d.pipeline_name || 'pipeline'
+  if (d.category_name) wizCategory.value = d.category_name
+  status.value = `Loaded "${d.pipeline_name}" (${rows.length} stage${rows.length === 1 ? '' : 's'}) — editable.`
+}
+function actionMapToTrace(m) {
+  if (!m || !m.action) return null
+  const act = String(m.action).toLowerCase()
+  if (act === 'click')  return { type: 'Click', selector: m.selector }
+  if (act === 'input')  return { type: 'Type', selector: m.selector, text: m.text || '' }
+  if (act === 'hover')  return { type: 'Hover', selector: m.selector }
+  if (act === 'wait')   return { type: 'Wait', ms: Math.round((m.seconds != null ? m.seconds : 1) * 1000) }
+  if (act === 'scroll') return { type: 'Scroll', y: (m.direction === 'up' ? -1 : 1) * (m.pixels || 600) }
+  return null
+}
+// Inverse of buildYaml: parse a pipeline YAML back into the editor model.
+function parseYamlToPipeline(text) {
+  let doc
+  try { doc = yaml.load(text) } catch (e) { status.value = 'YAML parse error: ' + e.message; return null }
+  if (!doc || !Array.isArray(doc.pipeline)) { status.value = 'No pipeline[] found in YAML.'; return null }
+  const rows = []
+  for (const st of doc.pipeline) {
+    if (!st || !st.stage) continue
+    let name = st.stage
+    const a = st.args
+    const row = { stage_name: name, args: {}, _fields: [], _markets: [], _trace: [], _aiIntent: '', _aiBox: null }
+    const fld = (x) => ({ selector: x.selector || '', as: x.as || 'field', method: x.method || 'text' })
+    if (name === 'extract') {
+      row._fields = (Array.isArray(a) ? a : []).filter(f => f && f.selector).map(fld)
+    } else if (name === 'flatSelect') {
+      row.args[segArgName(row)] = Array.isArray(a) ? (a[0] || '') : ''
+      row._fields = (Array.isArray(a) && Array.isArray(a[1]) ? a[1] : []).filter(f => f && f.selector).map(fld)
+    } else if (name === 'parallelSelect' || name === 'parallel_select') {
+      // round-trips as flatSelect with parallel (page-rooted) fields
+      row.stage_name = 'flatSelect'
+      const list = Array.isArray(a) && Array.isArray(a[0]) ? a[0] : []
+      row._fields = list.filter(f => f && f.selector).map(f => ({ ...fld(f), _parallel: true }))
+    } else if (isOdds(name)) {
+      const cfg = Array.isArray(a) ? a.find(x => x && x.markets) : (a && a.markets ? a : null)
+      row._markets = ((cfg && cfg.markets) || []).map((m, mi) => ({
+        label: m.label || ('Market ' + (mi + 1)), sectionSelector: m.sectionSelector || '',
+        rowSelector: m.rowSelector || '', enabled: true, _html: '',
+        fields: (m.fields || []).filter(f => f && f.selector).map(fld),
+      }))
+    } else if (FETCH_LIKE.has(name)) {
+      if (Array.isArray(a)) {
+        if (typeof a[0] === 'string') row.args[urlArgName(row)] = a[0]
+        const tr = a.find(x => Array.isArray(x))
+        if (Array.isArray(tr)) row._trace = tr.map(actionMapToTrace).filter(Boolean)
+      } else if (typeof a === 'string') { row.args[urlArgName(row)] = a }
+    } else {
+      const sch = argSchema(name)
+      if (Array.isArray(a)) a.forEach((v, i) => { if (sch[i] && (typeof v === 'string' || typeof v === 'number')) row.args[sch[i].name] = v })
+      else if (a && typeof a === 'object') for (const k of Object.keys(a)) row.args[k] = a[k]
+    }
+    rows.push(row)
+  }
+  const meta = doc.metadata || {}
+  if (meta.geo) wizGeo.value = String(meta.geo)
+  if (meta.runtime) wizRuntime.value = String(meta.runtime)
+  if (meta.category) wizCategory.value = String(meta.category)
+  return rows
+}
 const isStructured = (n) => n === 'extract' || n === 'flatSelect'
 const isOdds = (n) => n === 'oddsSelect' || n === 'odds_select'
 const FETCH_LIKE = new Set(['fetch', 'visit', 'wget', 'wgetExplore', 'visitExplore', 'explore', 'wgetJoin', 'visitJoin'])
@@ -545,7 +621,7 @@ function downloadCsv() {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-onMounted(async () => { token.value = await getToken(); stopPick = onPick((p) => handlePick(p)); loadCatalog() })
+onMounted(async () => { token.value = await getToken(); stopPick = onPick((p) => handlePick(p)); loadCatalog(); loadExisting() })
 onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer) })
 </script>
 
@@ -577,6 +653,13 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
       </section>
 
       <section class="editor">
+        <div class="row">
+          <select v-model="existingSel" class="text-input" style="flex:1" @focus="existingList.length || loadExisting()" @change="existingSel && openExisting(existingSel)">
+            <option value="">📂 Open existing pipeline…</option>
+            <option v-for="d in existingList" :key="d.pipeline_name" :value="d.pipeline_name">{{ d.is_draft ? '✏️ ' : '' }}{{ d.pipeline_name }}</option>
+          </select>
+          <button @click="loadExisting" title="Refresh pipeline list">↻</button>
+        </div>
         <div class="pmeta">
           <input v-model="wizName" class="name" placeholder="pipeline name *" />
           <input v-model="wizCategory" class="name" placeholder="category (optional)" />

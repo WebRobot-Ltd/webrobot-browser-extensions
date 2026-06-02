@@ -27,6 +27,7 @@ export async function post(path, payload) {
 
 // ── domain calls (ported from DemoApp.vue, same endpoints) ──
 export const catalogStages    = ()            => get('/demo/catalog/stages');
+export const listPipelines     = ()            => get('/demo/list');   // → { demos:[{pipeline_name, pipeline_yaml, ...}] }
 export const inferSegment      = (body)        => post('/demo/wizard/infer-segment', body);
 export const inferSelector     = (body)        => post('/demo/wizard/infer-selector', body);
 export const inferFields       = (body)        => post('/demo/wizard/infer-fields', body);
