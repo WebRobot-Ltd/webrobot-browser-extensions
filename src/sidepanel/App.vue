@@ -14,10 +14,16 @@ import {
    infer-odds-structure / relax / suggest-names) over the content-script
    transport. Camoufox stays the runtime; picking is on the REAL page. */
 
-// ── auth ──
+// ── mode + auth ──
+// Demo = public sandbox (auto demo JWT in the background, NO key needed).
+// Production = your account / BYOC subscription — coming soon (disabled).
+const mode = ref('demo')
 const token = ref('')
 const status = ref('')
-async function saveToken() { await setToken(token.value); status.value = 'Token saved.' }
+async function saveToken() { await setToken(token.value); status.value = token.value ? 'Key saved.' : 'Key cleared (demo auto-auth).' }
+// Future: redirect to the subscription / BYOC plans page. Disabled until plans
+// go live; for now Production mode only shows the "coming soon" notice.
+function openPlans() { /* TODO: ext.tabs.create({url: 'https://www.webrobot.eu/pricing'}) when plans ship */ }
 
 // ── catalog ──
 const stages = ref([])
@@ -359,10 +365,18 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
 <template>
   <div class="wrap">
     <header><strong>WebRobot Designer</strong><span class="muted">extension</span></header>
-    <div class="row">
-      <input v-model="token" type="password" placeholder="API token" />
-      <button @click="saveToken">Save</button>
+    <div class="row modebar">
+      <span class="seg">
+        <button :class="{active: mode==='demo'}" @click="mode='demo'">Demo</button>
+        <button :class="{active: mode==='prod'}" @click="mode='prod'" title="Subscription / BYOC plans — coming soon">Production 🔒</button>
+      </span>
       <button @click="loadCatalog" :disabled="loadingCatalog">↻ Stages</button>
+    </div>
+    <p v-if="mode==='demo'" class="muted small">Demo sandbox — public endpoint, no key needed (auto-auth).</p>
+    <div v-else class="cs">
+      🔒 <strong>Subscription &amp; BYOC plans — coming soon.</strong>
+      <span>Run pipelines on your own account / cloud.</span>
+      <button @click="openPlans" disabled>View plans →</button>
     </div>
     <p class="status" v-if="status">{{ status }}</p>
 
@@ -529,6 +543,13 @@ button:hover { background: #e9ebf7; } button.on { background: #ddd6fe; }
 button.run { background: linear-gradient(135deg,#4f46e5,#764ba2); color:#fff; border:0; }
 button.rec { background: #fecaca; }
 .status { color: #4f46e5; font-size: 12px; margin: 4px 0; word-break: break-word; }
+.small { font-size: 11px; margin: 2px 0 6px; }
+.modebar { align-items: center; }
+.seg { display: inline-flex; border: 1px solid #c7cbe0; border-radius: 999px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: #fff; padding: 4px 12px; }
+.seg button.active { background: linear-gradient(135deg,#4f46e5,#764ba2); color: #fff; }
+.cs { background: #fef3c7; border: 1px solid #fde68a; color: #92400e; border-radius: 8px; padding: 8px; margin: 4px 0 8px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cs button[disabled] { opacity: .6; }
 .cols { display: flex; gap: 10px; align-items: flex-start; }
 .palette { width: 140px; flex: none; }
 .palette input { width: 100%; margin-bottom: 6px; }

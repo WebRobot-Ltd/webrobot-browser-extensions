@@ -130,17 +130,42 @@ async function injectPicker(tabId) {
   });
 }
 
-// Thin proxy for the WebRobot REST API (infer-segment/fields/selector,
-// apply-variables, execute, executions/{id}/status|logs|output, save, ...).
+// Demo auto-auth: the /demo/* endpoints are public but the portal still
+// attaches an anonymous demo JWT (org attribution). We replicate it — log in
+// to Strapi with the same demo creds the VitePress demo uses (already public
+// in that bundle), cache the JWT, refresh on 401. No user-entered key needed.
+const STRAPI_URL = 'https://strapi.webrobot.eu';
+const DEMO_EMAIL = 'demo@webrobot.eu';
+const DEMO_PASSWORD = 'demo2026';
+
+async function demoToken(force) {
+  if (!force) { const { demo_jwt } = await api.storage.local.get('demo_jwt'); if (demo_jwt) return demo_jwt; }
+  try {
+    const r = await fetch(STRAPI_URL + '/api/auth/local', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: DEMO_EMAIL, password: DEMO_PASSWORD }),
+    });
+    const j = await r.json().catch(() => ({}));
+    const t = j.jwt || (j.data && j.data.jwt) || '';
+    if (t) await api.storage.local.set({ demo_jwt: t });
+    return t;
+  } catch (_) { return ''; }
+}
+
+// Thin proxy for the WebRobot REST API. Auth precedence: user-supplied token
+// (advanced) → auto demo JWT. On 401 with the demo token, refresh once.
 async function apiFetch(path, init = {}) {
-  const { token } = await api.storage.local.get('token');
-  const headers = Object.assign(
-    { 'Content-Type': 'application/json' },
-    init.headers || {},
-    token ? { Authorization: 'Bearer ' + token } : {}
-  );
-  const res = await fetch(API_BASE + path, Object.assign({}, init, { headers }));
-  const text = await res.text();
-  let body; try { body = JSON.parse(text); } catch (_) { body = text; }
-  return { status: res.status, ok: res.ok, body };
+  const { token } = await api.storage.local.get('token'); // optional override
+  async function once(bearer) {
+    const headers = Object.assign({ 'Content-Type': 'application/json' }, init.headers || {},
+      bearer ? { Authorization: 'Bearer ' + bearer } : {});
+    const res = await fetch(API_BASE + path, Object.assign({}, init, { headers }));
+    const text = await res.text();
+    let body; try { body = JSON.parse(text); } catch (_) { body = text; }
+    return { status: res.status, ok: res.ok, body };
+  }
+  let bearer = token || await demoToken(false);
+  let r = await once(bearer);
+  if (r.status === 401 && !token) { bearer = await demoToken(true); r = await once(bearer); }
+  return r;
 }
