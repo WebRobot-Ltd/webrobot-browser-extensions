@@ -34,6 +34,29 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     apiFetch(msg.path, msg.init).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
     return true; // async
   }
+  // Current active-tab URL (fetch/visit "use current URL").
+  if (msg.__wr_cmd === 'current-url') {
+    api.tabs.query({ active: true, currentWindow: true })
+      .then((t) => sendResponse({ url: t[0]?.url || '', title: t[0]?.title || '' }))
+      .catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
+  // Grab the live page HTML (whole page, or one selector's outerHTML) for AI
+  // Magic — uses the user's REAL rendered page (no Camoufox needed for picking).
+  if (msg.__wr_cmd === 'page-html') {
+    api.scripting.executeScript({
+      target: { tabId: msg.tabId },
+      args: [msg.selector || null],
+      func: (sel) => {
+        try {
+          if (sel) { const el = document.querySelector(sel); return el ? el.outerHTML : ''; }
+          return document.documentElement.outerHTML;
+        } catch (_) { return ''; }
+      },
+    }).then((r) => sendResponse({ html: (r && r[0] && r[0].result) || '' }))
+      .catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
 });
 
 async function injectPicker(tabId) {

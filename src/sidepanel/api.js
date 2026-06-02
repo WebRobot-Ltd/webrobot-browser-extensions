@@ -28,6 +28,7 @@ export async function post(path, payload) {
 // ── domain calls (ported from DemoApp.vue, same endpoints) ──
 export const catalogStages    = ()            => get('/demo/catalog/stages');
 export const inferSegment      = (body)        => post('/demo/wizard/infer-segment', body);
+export const inferSelector     = (body)        => post('/demo/wizard/infer-selector', body);
 export const inferFields       = (body)        => post('/demo/wizard/infer-fields', body);
 export const inferBodySelector = (body)        => post('/demo/wizard/infer-body-selector', body);
 export const inferOddsStructure= (body)        => post('/demo/wizard/infer-odds-structure', body);
@@ -57,6 +58,17 @@ export async function startPicker(mode = 'selector-single') {
   if (!r?.ok) throw new Error(r?.error || 'inject failed');
   await ext.runtime.sendMessage({ __wr_cmd: 'to-picker', tabId, payload: { type: 'webrobot-picker-mode', mode } });
   return tabId;
+}
+/** Active tab URL (for fetch/visit "use current URL"). */
+export async function currentUrl() {
+  const r = await ext.runtime.sendMessage({ __wr_cmd: 'current-url' });
+  return (r && r.url) || '';
+}
+/** Live page HTML (whole page, or one selector's outerHTML) for AI inference. */
+export async function pageHtml(selector) {
+  const tabId = await activeTabId();
+  const r = await ext.runtime.sendMessage({ __wr_cmd: 'page-html', tabId, selector: selector || null });
+  return (r && r.html) || '';
 }
 /** Send a message INTO the picker (highlight, mode, generalize-result, …). */
 export async function sendToPicker(tabId, payload) {
