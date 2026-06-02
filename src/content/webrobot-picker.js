@@ -58,6 +58,11 @@
   var pickedNode = null;
 
   var mode = 'selector-single';   // see protocol above
+  // EXTENSION DIVERGENCE: on the REAL page the picker must YIELD when idle —
+  // otherwise its capture-phase listeners block every <a> click forever (fine
+  // in the Camoufox mirror, broken on the live tab: kills navigation + Replay).
+  // The side panel sends {mode:'off'} to deactivate; any real mode reactivates.
+  var pickerActive = true;
   // Link-following intent: set by the host for explore / join / visitExplore
   // stages (which FOLLOW a link). When true, a pick climbs from the clicked
   // element to its nearest <a href> ancestor before computing the selector —
@@ -230,10 +235,20 @@
   window.addEventListener('message', function (ev) {
     var d = ev.data;
     if (!d || typeof d !== 'object') return;
+    // EXTENSION: deactivate — stop intercepting clicks so the page navigates
+    // normally (and Replay can drive it). Clears banner + hover highlight.
+    if (d.type === 'webrobot-picker-mode' && d.mode === 'off') {
+      pickerActive = false;
+      try { if (typeof clearHover === 'function') clearHover(); } catch (_) {}
+      try { if (banner) banner.style.display = 'none'; } catch (_) {}
+      return;
+    }
     if (d.type === 'webrobot-picker-mode' &&
         (d.mode === 'selector-single' || d.mode === 'selector-list' ||
          d.mode === 'action-record'   || d.mode === 'multi-field' ||
          d.mode === 'multi-sample'    || d.mode === 'row-lca')) {
+      pickerActive = true;
+      try { if (banner) banner.style.display = ''; } catch (_) {}
       mode = d.mode;
       // Host tells us whether this stage FOLLOWS a link (explore/join/
       // visitExplore) so picks climb to the <a href>. Only update when the
@@ -587,6 +602,7 @@
   // present (it may be stripped). Propagation continues, so the bubble-phase
   // handler below still stages/picks. Banner UI and captcha flow are exempt.
   document.addEventListener('click', function (e) {
+    if (!pickerActive) return; // EXTENSION: idle → let links navigate normally
     if (e.target === banner || (banner && banner.contains(e.target))) return;
     if (blockInfo) return; // captcha: let the challenge widget handle clicks
     var navAnchor = e.target && e.target.closest ? e.target.closest('a[href]') : null;
@@ -601,6 +617,7 @@
   // In selector modes: preventDefault + post a pick.
   // In action mode: observe + record, let the page handle normally.
   document.addEventListener('click', function (e) {
+    if (!pickerActive) return; // EXTENSION: idle → don't intercept page clicks
     if (e.target === banner || banner.contains(e.target)) return;
     // When blocked by a captcha, let the page handle clicks natively
     // so the user can solve the challenge. The page won't be navigated

@@ -35,8 +35,8 @@ export const inferOddsStructure= (body)        => post('/demo/wizard/infer-odds-
 export const relaxSelectors    = (body)        => post('/demo/wizard/relax-selectors', body);
 export const suggestFieldNames = (body)        => post('/demo/wizard/suggest-field-names', body);
 export const validatePipeline  = (body)        => post('/demo/wizard/validate', body);
-// Run: create/update + execute in one call (Save & Run), then poll status/logs/output.
-export const generatePipeline  = (body)        => post('/demo/generate-pipeline', body);
+// Run: save the built YAML + execute in one call (Save & Run), then poll.
+export const saveGeneratedPipeline = (body)    => post('/demo/save-generated-pipeline', body);
 export const executeDemo       = (name, body)  => post(`/demo/execute/${encodeURIComponent(name)}`, body);
 export const executionStatus   = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/status`);
 export const executionLogs     = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/logs`);

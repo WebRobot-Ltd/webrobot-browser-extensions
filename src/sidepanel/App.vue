@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
   catalogStages, getToken, setToken, startPicker, onPick, sendToPicker,
   inferSegment, inferSelector, inferFields, inferOddsStructure, suggestFieldNames,
-  relaxSelectors, validatePipeline, generatePipeline,
+  relaxSelectors, validatePipeline, saveGeneratedPipeline,
   executionStatus, executionLogs, executionOutput, currentUrl, pageHtml,
   runTrace, highlight,
 } from './api.js'
@@ -85,6 +85,12 @@ async function beginPick(target, mode) {
   try { pickTab = await startPicker(mode); status.value = `Picker (${mode}) — interact on the page.` }
   catch (e) { status.value = 'Picker error: ' + e.message }
 }
+// Tell the picker to STOP intercepting (so links navigate + Replay works).
+async function deactivatePicker() {
+  try { await sendToPicker(pickTab, { type: 'webrobot-picker-mode', mode: 'off' }) } catch (_) {}
+  pt.value = null
+}
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const pickArg = (i, name) => beginPick({ stageIdx: i, kind: 'arg', argName: name }, 'selector-single')
 const pickArgList = (i, name) => beginPick({ stageIdx: i, kind: 'arg', argName: name }, 'multi-sample')
 const pickFields = (i) => beginPick({ stageIdx: i, kind: 'field-multi' }, 'multi-field')
@@ -92,7 +98,7 @@ const pickRowLca = (i, name) => beginPick({ stageIdx: i, kind: 'arg', argName: n
 const pickMarketBox = (i) => beginPick({ stageIdx: i, kind: 'market-box' }, 'selector-single')
 const pickMacroBox = (i) => beginPick({ stageIdx: i, kind: 'macro-box' }, 'selector-single')
 async function recordTrace(i) { recording.value = i; await beginPick({ stageIdx: i, kind: 'trace' }, 'action-record') }
-async function stopRecord(i) { await sendToPicker(pickTab, { type: 'webrobot-picker-stop-recording' }); recording.value = null; status.value = 'Recording stopped.' }
+async function stopRecord(i) { await sendToPicker(pickTab, { type: 'webrobot-picker-stop-recording' }); recording.value = null; await sleep(150); await deactivatePicker(); status.value = 'Recording stopped.' }
 
 async function useCurrentUrl(i, name) {
   try { const u = await currentUrl(); if (u) { updateArg(i, name, u); status.value = 'URL: ' + u } }
@@ -134,11 +140,11 @@ async function handlePick(p) {
     return
   }
   if (p.type === 'webrobot-pick-selector') {
-    if (t.kind === 'market-box') { await appendMarket(t.stageIdx, p.selector, p.sampleHtmlFull || p.sampleHtml || ''); return }
-    if (t.kind === 'macro-box') { row._aiBox = { selector: p.selector, html: p.sampleHtmlFull || p.sampleHtml || '' }; touch(); status.value = '📦 Content box set — describe fields then 🪄.'; return }
-    if (t.kind === 'arg') { updateArg(t.stageIdx, t.argName, p.selector); status.value = `${t.argName} = ${p.selector}` + (p.matches != null ? ` (${p.matches})` : '') }
+    if (t.kind === 'market-box') { await appendMarket(t.stageIdx, p.selector, p.sampleHtmlFull || p.sampleHtml || ''); await deactivatePicker(); return }
+    if (t.kind === 'macro-box') { row._aiBox = { selector: p.selector, html: p.sampleHtmlFull || p.sampleHtml || '' }; touch(); status.value = '📦 Content box set — describe fields then 🪄.'; await deactivatePicker(); return }
+    if (t.kind === 'arg') { updateArg(t.stageIdx, t.argName, p.selector); status.value = `${t.argName} = ${p.selector}` + (p.matches != null ? ` (${p.matches})` : ''); await deactivatePicker() }
   } else if (p.type === 'webrobot-pick-multi-sample') {
-    if (t.kind === 'arg') { updateArg(t.stageIdx, t.argName, p.selector); status.value = `${t.argName} = ${p.selector} (${p.matches || '?'} matches)` }
+    if (t.kind === 'arg') { updateArg(t.stageIdx, t.argName, p.selector); status.value = `${t.argName} = ${p.selector} (${p.matches || '?'} matches)`; await deactivatePicker() }
   } else if (p.type === 'webrobot-pick-multi-field') {
     if (t.kind !== 'field-multi') return
     const fields = (row._fields ||= []); const sel = (p.selector || '').trim()
@@ -289,7 +295,7 @@ function asTable(j) {
 async function doValidate() {
   validating.value = true; validateRows.value = null; status.value = 'Validating on Camoufox…'
   try {
-    const j = await validatePipeline({ pipeline_yaml: wizYaml.value })
+    const j = await validatePipeline({ yaml: wizYaml.value })
     if (j.ok === false) { status.value = 'Validation failed: ' + (j.error || ''); return }
     validateRows.value = asTable(j)
     status.value = `Validation OK — ${validateRows.value.rows.length} preview row(s).`
@@ -322,15 +328,18 @@ async function testStage(i) {
 async function replayTrace(i) {
   const t = pipeline.value[i]._trace || []; if (!t.length) return
   status.value = '▶ Replaying trace on the page…'
+  await deactivatePicker(); await sleep(150)   // ensure the picker isn't eating the synthetic clicks
   try { const r = await runTrace(t); status.value = '▶ Replay done: ' + ((r.steps || []).join(', ') || 'no steps') }
   catch (e) { status.value = 'Replay error: ' + e.message }
 }
 async function run() {
   running.value = true; execRows.value = null; execLogs.value = ''; execState.value = 'submitting'; status.value = 'Submitting…'
   try {
-    const j = await generatePipeline({ pipeline_name: wizName.value, pipeline_yaml: wizYaml.value, execute: true })
-    const id = j.execution_id || j.executionId || j.id || (j.execution && j.execution.id)
-    if (!id) throw new Error('no execution id'); execId.value = id; status.value = 'Running ' + id; poll()
+    const j = await saveGeneratedPipeline({ pipeline_name: wizName.value, pipeline_yaml: wizYaml.value, execute: true })
+    const ex = j.execution || {}
+    const id = ex.execution_id || j.execution_id || ex.id || j.id
+    if (!id) throw new Error('no execution id in response')
+    execId.value = id; status.value = 'Running ' + id; poll()
   } catch (e) { running.value = false; execState.value = 'error'; status.value = 'Run error: ' + e.message }
 }
 async function poll() {
