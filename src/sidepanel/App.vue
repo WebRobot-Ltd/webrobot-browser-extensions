@@ -356,6 +356,7 @@ function buildYaml() {
 // ── validate / run ──
 const validating = ref(false), running = ref(false)
 const execId = ref(''), execState = ref(''), execLogs = ref(''), execRows = ref(null), outDatasetId = ref(null)
+const execInfo = ref(null)        // full status object (phase, message, driver/executors, …)
 const validateRows = ref(null)   // { columns, rows } from server dry-run (Camoufox)
 const testCounts = ref(null)     // local 👁 Test counts (real page, no Camoufox)
 let pollTimer = null
@@ -414,12 +415,14 @@ async function replayTrace(i) {
 // could be parameterized) and bind them to dataset columns → reusable template
 // to publish on the marketplace. Button + coming-soon notice for now.
 const showTpl = ref(false)
+const showExec = ref(false)        // job status/logs modal (roomier than inline)
 // ── Run modal (mirrors the demo app's "run pipeline" dialog) ──
 const showRunModal = ref(false)
 const runMode = ref('none')        // 'none' (auto-trigger) | 'existing' | 'upload'
 const runCsvText = ref('')
 function openRunModal() {
   if (!pipeline.value.length) { status.value = 'Add at least one stage first.'; return }
+  clearSelections()   // clear page highlights + release the picker before running
   showRunModal.value = true
 }
 async function runConfirm() {
@@ -449,14 +452,17 @@ async function runConfirm() {
     const id = r.execution_id || (r.execution && r.execution.execution_id)
     if (!id) { running.value = false; execState.value = 'error'; status.value = 'No execution_id: ' + (r.error || JSON.stringify(r).slice(0, 200)); return }
     execId.value = id; outDatasetId.value = r.output_dataset_id || null
+    showExec.value = true            // open the roomy status/logs modal
     status.value = 'Running ' + id; poll()
   } catch (e) { running.value = false; execState.value = 'error'; status.value = 'Run error: ' + e.message }
 }
 async function poll() {
   try {
-    const s = await executionStatus(execId.value); execState.value = s.status || s.state || JSON.stringify(s)
+    const s = await executionStatus(execId.value)
+    execInfo.value = (s && typeof s === 'object') ? s : null
+    execState.value = (s && (s.status || s.phase)) || 'UNKNOWN'
     const done = /SUCCEED|COMPLETE|FAIL|ERROR|KILLED/i.test(execState.value)
-    try { const l = await executionLogs(execId.value); execLogs.value = (typeof l === 'string' ? l : (l.logs || JSON.stringify(l))).slice(-4000) } catch (_) {}
+    try { const l = await executionLogs(execId.value); execLogs.value = (typeof l === 'string' ? l : (l.logs || JSON.stringify(l))).slice(-6000) } catch (_) {}
     if (done) { running.value = false; if (/SUCCEED|COMPLETE/i.test(execState.value)) { try { execRows.value = asTable(await executionOutput(execId.value)) } catch (_) {} } return }
     pollTimer = setTimeout(poll, 3000)
   } catch (e) { running.value = false; execState.value = 'error'; status.value = 'Poll error: ' + e.message }
@@ -630,15 +636,46 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
           </table>
         </div>
 
-        <div v-if="execId" class="exec">
-          <div><strong>{{ execId }}</strong> — <span :class="{ok:/SUCCEED|COMPLETE/i.test(execState), bad:/FAIL|ERROR|KILLED/i.test(execState)}">{{ execState }}</span></div>
-          <pre v-if="execLogs" class="logs">{{ execLogs }}</pre>
-          <div v-if="execRows && execRows.rows && execRows.rows.length" class="out">
+        <div v-if="execId" class="exec-chip">
+          <span class="dotst" :class="{ok:/SUCCEED|COMPLETE/i.test(execState), bad:/FAIL|ERROR|KILLED/i.test(execState)}">●</span>
+          <code>{{ execId }}</code> — {{ execState }}
+          <button @click="showExec=true">📊 Job status</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Job status / logs / output — roomy modal (the side panel is narrow) -->
+    <div v-if="showExec && execId" class="modal-bg" @click.self="showExec=false">
+      <div class="modal modal-lg">
+        <div class="modal-head">
+          <strong>Job</strong> <code>{{ execId }}</code>
+          <span class="state" :class="{ok:/SUCCEED|COMPLETE/i.test(execState), bad:/FAIL|ERROR|KILLED/i.test(execState)}">{{ execState }}</span>
+          <span class="sp"></span>
+          <button @click="showExec=false">✕</button>
+        </div>
+        <div v-if="execInfo" class="kube">
+          <div class="krow"><span class="kk">Phase</span><span>{{ execInfo.phase || execInfo.status || '—' }}</span></div>
+          <div class="krow" v-if="execInfo.progress_message || execInfo.message"><span class="kk">Message</span><span>{{ execInfo.progress_message || execInfo.message }}</span></div>
+          <div class="krow" v-if="execInfo.error_message"><span class="kk">Error</span><span class="bad">{{ execInfo.error_message }}</span></div>
+          <div class="krow" v-if="execInfo.driver"><span class="kk">Driver pod</span><span>{{ execInfo.driver.phase }}<template v-if="execInfo.driver.ready"> ✓</template><template v-if="execInfo.driver.image_pulling"> · pulling image</template><template v-if="execInfo.driver.reason"> ({{ execInfo.driver.reason }})</template><template v-if="execInfo.driver.node"> @{{ execInfo.driver.node }}</template></span></div>
+          <div class="krow" v-if="execInfo.executors_total != null"><span class="kk">Executors</span><span>{{ execInfo.executors_ready || 0 }}/{{ execInfo.executors_total }} ready</span></div>
+          <template v-if="Array.isArray(execInfo.executors)">
+            <div class="krow" v-for="(ex, xi) in execInfo.executors" :key="xi"><span class="kk">· executor {{ ex.index != null ? ex.index : xi }}</span><span>{{ ex.phase }}<template v-if="ex.ready"> ✓</template><template v-if="ex.image_pulling"> · pulling</template><template v-if="ex.reason"> ({{ ex.reason }})</template><template v-if="ex.node"> @{{ ex.node }}</template></span></div>
+          </template>
+          <div class="krow" v-if="execInfo.records_output != null"><span class="kk">Records out</span><span>{{ execInfo.records_output }}</span></div>
+          <div class="krow" v-if="execInfo.duration_seconds != null"><span class="kk">Duration</span><span>{{ execInfo.duration_seconds }}s</span></div>
+          <div class="krow" v-if="execInfo.output_dataset_id"><span class="kk">Output dataset</span><span>{{ execInfo.output_dataset_id }}</span></div>
+        </div>
+        <h4>Logs</h4>
+        <pre class="logs logs-lg">{{ execLogs || '(waiting for logs…)' }}</pre>
+        <template v-if="execRows && execRows.rows && execRows.rows.length">
+          <h4>Output ({{ execRows.rows.length }} rows{{ execRows.rows.length>10 ? ', showing 10' : '' }})</h4>
+          <div class="out-scroll">
             <table class="ftab"><tr><th v-for="c in execRows.columns" :key="c">{{ c }}</th></tr>
               <tr v-for="(r, ri) in execRows.rows.slice(0,10)" :key="ri"><td v-for="c in execRows.columns" :key="c">{{ r[c] }}</td></tr></table>
           </div>
-        </div>
-      </section>
+        </template>
+      </div>
     </div>
 
     <!-- Run modal — choose the input dataset like the demo app's run dialog -->
@@ -730,4 +767,14 @@ h4 { margin: 8px 0 4px; }
 .modal .ml input, .modal .ml textarea { width: 100%; }
 .modal .radio { display: flex; align-items: center; gap: 6px; margin: 4px 0; font-size: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.modal-lg { max-width: 96%; width: 96%; max-height: 88vh; overflow: auto; }
+.modal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.modal-head .state { font-weight: 700; } .modal-head .state.ok { color: #16a34a; } .modal-head .state.bad { color: #dc2626; }
+.logs-lg { max-height: 46vh; }
+.out-scroll { max-height: 30vh; overflow: auto; }
+.exec-chip { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; border-top: 1px solid #e6e8ef; padding-top: 8px; }
+.dotst { color: #f59e0b; } .dotst.ok { color: #16a34a; } .dotst.bad { color: #dc2626; }
+.kube { background: #f7f8fc; border: 1px solid #e6e8ef; border-radius: 8px; padding: 8px; margin: 4px 0; font-size: 12px; }
+.kube .krow { display: flex; gap: 8px; }
+.kube .kk { color: #6b7280; min-width: 120px; }
 </style>
