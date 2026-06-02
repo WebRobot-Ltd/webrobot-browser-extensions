@@ -482,6 +482,13 @@ async function runConfirm() {
   } catch (e) { running.value = false; execState.value = 'error'; status.value = 'Run error: ' + e.message }
 }
 function refreshStatus() { if (!execId.value) return; if (pollTimer) clearTimeout(pollTimer); poll() }
+// Reset the execution panel/modal so the user can start a fresh run.
+function clearStatus() {
+  if (pollTimer) clearTimeout(pollTimer)
+  running.value = false; showExec.value = false
+  execId.value = ''; execState.value = ''; execLogs.value = ''; execRows.value = null; execInfo.value = null; outDatasetId.value = null
+  status.value = 'Status cleared.'
+}
 async function poll() {
   try {
     const s = await executionStatus(execId.value)
@@ -707,6 +714,7 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
           <span class="dotst" :class="{ok:/SUCCEED|COMPLETE/i.test(execState), bad:/FAIL|ERROR|KILLED/i.test(execState)}">●</span>
           <code>{{ execId }}</code> — {{ execState }}
           <button @click="showExec=true">📊 Job status</button>
+          <button @click="clearStatus" title="Clear / dismiss this run">🧹 Clear</button>
         </div>
       </section>
     </div>
@@ -719,6 +727,7 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
           <span class="state" :class="{ok:/SUCCEED|COMPLETE/i.test(execState), bad:/FAIL|ERROR|KILLED/i.test(execState)}">{{ execState }}</span>
           <span class="sp"></span>
           <button @click="refreshStatus">↻ Refresh</button>
+          <button @click="clearStatus">🧹 Clear</button>
           <button @click="showExec=false">✕</button>
         </div>
         <div v-if="execInfo" class="kube">
