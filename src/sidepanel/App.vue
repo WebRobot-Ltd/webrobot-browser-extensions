@@ -89,7 +89,12 @@ const oddsInferKey = ref(null), aiBusy = ref(false)
 
 async function beginPick(target, mode) {
   pt.value = target
-  try { pickTab = await startPicker(mode); status.value = `Picker (${mode}) — interact on the page.` }
+  try {
+    pickTab = await startPicker(mode); status.value = `Picker (${mode}) — interact on the page.`
+    // Clear any stale row/link highlights so hovering is clean during this pick.
+    try { await sendToPicker(pickTab, { type: 'webrobot-picker-multi-clear' }) } catch (_) {}
+    await sendMultiConfig(null)
+  }
   catch (e) { status.value = 'Picker error: ' + e.message }
 }
 // Tell the picker to STOP intercepting (so links navigate + Replay works).

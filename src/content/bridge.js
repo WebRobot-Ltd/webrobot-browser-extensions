@@ -11,6 +11,9 @@
 // listeners are registered before the picker can emit anything.
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
+  // Idempotent: re-injection on every pick must not stack duplicate relays.
+  if (window.__wrBridgeInjected) return;
+  window.__wrBridgeInjected = true;
 
   // picker -> background (only webrobot-* messages; skip what we delivered).
   window.addEventListener('message', (ev) => {

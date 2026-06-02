@@ -34,6 +34,17 @@
 (function () {
   'use strict';
 
+  // EXTENSION: idempotent injection. The side panel re-runs executeScript on
+  // every pick; without this guard each call would spawn ANOTHER picker with
+  // its own hover/click listeners + banner → duplicate outlines that never
+  // clear ("stays highlighted without clicking"). Inject once per document;
+  // a re-run just re-activates the existing instance.
+  if (window.__wrPickerInjected) {
+    try { window.__wrPickerOff = false; } catch (_) {}
+    return;
+  }
+  window.__wrPickerInjected = true;
+
   var STYLE_HOVER  = '2px solid #2196f3';
   var STYLE_PICKED = '2px solid #43a047';
   // Used in selector-list / selector-single mode to outline OTHER
