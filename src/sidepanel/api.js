@@ -64,6 +64,18 @@ export async function currentUrl() {
   const r = await ext.runtime.sendMessage({ __wr_cmd: 'current-url' });
   return (r && r.url) || '';
 }
+/** Replay a recorded trace on the REAL page (local — no Camoufox). */
+export async function runTrace(actions) {
+  const tabId = await activeTabId()
+  const r = await ext.runtime.sendMessage({ __wr_cmd: 'run-trace', tabId, actions })
+  return r || {}
+}
+/** Highlight selector matches on the REAL page + get counts (local, any stage). */
+export async function highlight(items, scope) {
+  const tabId = await activeTabId()
+  const r = await ext.runtime.sendMessage({ __wr_cmd: 'highlight', tabId, items, scope: scope || null })
+  return (r && r.counts) || []
+}
 /** Live page HTML (whole page, or one selector's outerHTML) for AI inference. */
 export async function pageHtml(selector) {
   const tabId = await activeTabId();

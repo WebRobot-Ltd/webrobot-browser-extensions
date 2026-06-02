@@ -5,6 +5,7 @@ import {
   inferSegment, inferSelector, inferFields, inferOddsStructure, suggestFieldNames,
   relaxSelectors, validatePipeline, generatePipeline,
   executionStatus, executionLogs, executionOutput, currentUrl, pageHtml,
+  runTrace, highlight,
 } from './api.js'
 
 /* WebRobot Pipeline Designer — browser-extension port of DemoApp.vue.
@@ -271,11 +272,58 @@ function buildYaml() {
 // ── validate / run ──
 const validating = ref(false), running = ref(false)
 const execId = ref(''), execState = ref(''), execLogs = ref(''), execRows = ref(null)
+const validateRows = ref(null)   // { columns, rows } from server dry-run (Camoufox)
+const testCounts = ref(null)     // local 👁 Test counts (real page, no Camoufox)
 let pollTimer = null
+
+// Normalize any array-of-objects (or {columns,rows}) into {columns, rows}.
+function asTable(j) {
+  if (!j) return null
+  if (Array.isArray(j.rows) && Array.isArray(j.columns)) return { columns: j.columns, rows: j.rows }
+  const arr = Array.isArray(j) ? j : (j.records || j.rows || j.preview || j.data)
+  if (!Array.isArray(arr) || !arr.length) return { columns: [], rows: [] }
+  const cols = []; arr.forEach(r => Object.keys(r || {}).forEach(k => { if (!cols.includes(k)) cols.push(k) }))
+  return { columns: cols, rows: arr }
+}
+
 async function doValidate() {
-  validating.value = true; status.value = 'Validating…'
-  try { const j = await validatePipeline({ pipeline_yaml: wizYaml.value }); status.value = j.ok === false ? ('Validation failed: ' + (j.error || '')) : `Validation OK (${(j.records || []).length} rows).` }
-  catch (e) { status.value = 'Validate error: ' + e.message } finally { validating.value = false }
+  validating.value = true; validateRows.value = null; status.value = 'Validating on Camoufox…'
+  try {
+    const j = await validatePipeline({ pipeline_yaml: wizYaml.value })
+    if (j.ok === false) { status.value = 'Validation failed: ' + (j.error || ''); return }
+    validateRows.value = asTable(j)
+    status.value = `Validation OK — ${validateRows.value.rows.length} preview row(s).`
+  } catch (e) { status.value = 'Validate error: ' + e.message } finally { validating.value = false }
+}
+
+// ── local on-page test (real tab, no Camoufox): highlight + count matches ──
+async function testStage(i) {
+  const row = pipeline.value[i]; testCounts.value = null
+  const items = []
+  if (row.stage_name === 'flatSelect') {
+    const seg = row.args[segArgName(row)]
+    if (seg) items.push({ selector: seg, color: '#4f46e5', label: 'segment' })
+    for (const f of (row._fields || [])) if (f.selector) items.push({ selector: seg ? `${seg} ${f.selector}` : f.selector, color: '#10b981', label: f.as })
+  } else if (row.stage_name === 'extract') {
+    for (const f of (row._fields || [])) if (f.selector) items.push({ selector: f.selector, color: '#10b981', label: f.as })
+  } else if (isOdds(row.stage_name)) {
+    for (const m of (row._markets || [])) {
+      if (m.sectionSelector) items.push({ selector: m.sectionSelector, color: '#f59e0b', label: m.label || 'market' })
+      for (const f of (m.fields || [])) if (f.selector) items.push({ selector: (m.sectionSelector ? m.sectionSelector + ' ' : '') + (m.rowSelector ? m.rowSelector + ' ' : '') + f.selector, color: '#10b981', label: f.as })
+    }
+  } else {
+    for (const a of argSchema(row.stage_name)) if (/selector/i.test(a.name) && row.args[a.name]) items.push({ selector: row.args[a.name], color: '#4f46e5', label: a.name })
+  }
+  if (!items.length) { status.value = 'Nothing to test on this stage.'; return }
+  try { testCounts.value = await highlight(items); status.value = 'Tested on page — see highlights + counts below.' }
+  catch (e) { status.value = 'Test error: ' + e.message }
+}
+
+async function replayTrace(i) {
+  const t = pipeline.value[i]._trace || []; if (!t.length) return
+  status.value = '▶ Replaying trace on the page…'
+  try { const r = await runTrace(t); status.value = '▶ Replay done: ' + ((r.steps || []).join(', ') || 'no steps') }
+  catch (e) { status.value = 'Replay error: ' + e.message }
 }
 async function run() {
   running.value = true; execRows.value = null; execLogs.value = ''; execState.value = 'submitting'; status.value = 'Submitting…'
@@ -290,7 +338,7 @@ async function poll() {
     const s = await executionStatus(execId.value); execState.value = s.status || s.state || JSON.stringify(s)
     const done = /SUCCEED|COMPLETE|FAIL|ERROR|KILLED/i.test(execState.value)
     try { const l = await executionLogs(execId.value); execLogs.value = (typeof l === 'string' ? l : (l.logs || JSON.stringify(l))).slice(-4000) } catch (_) {}
-    if (done) { running.value = false; if (/SUCCEED|COMPLETE/i.test(execState.value)) { try { execRows.value = await executionOutput(execId.value) } catch (_) {} } return }
+    if (done) { running.value = false; if (/SUCCEED|COMPLETE/i.test(execState.value)) { try { execRows.value = asTable(await executionOutput(execId.value)) } catch (_) {} } return }
     pollTimer = setTimeout(poll, 3000)
   } catch (e) { running.value = false; execState.value = 'error'; status.value = 'Poll error: ' + e.message }
 }
@@ -326,6 +374,7 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
             <strong>{{ i + 1 }}. {{ row.stage_name }}</strong>
             <span v-if="(row._trace||[]).length" class="badge" :title="(row._trace.length)+' actions'">🎬 {{ row._trace.length }}</span>
             <span class="sp"></span>
+            <button @click="testStage(i)" title="highlight selectors on the real page + count matches">👁</button>
             <button @click="moveStage(i,-1)" :disabled="i===0">↑</button>
             <button @click="moveStage(i,1)" :disabled="i===pipeline.length-1">↓</button>
             <button @click="removeStage(i)">✕</button>
@@ -403,6 +452,7 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
               <strong>Trace ({{ (row._trace||[]).length }})</strong>
               <button v-if="recording!==i" @click="recordTrace(i)">⏺ Record</button>
               <button v-else @click="stopRecord(i)" class="rec">⏹ Stop</button>
+              <button v-if="(row._trace||[]).length" @click="replayTrace(i)" title="execute the trace on the page">▶ Replay</button>
               <button v-if="(row._trace||[]).length" @click="clearTrace(i)">clear</button>
             </div>
             <ul v-if="(row._trace||[]).length" class="trace">
@@ -422,9 +472,25 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
           <h4>YAML</h4>
           <pre class="yaml">{{ wizYaml }}</pre>
           <div class="row">
-            <button @click="doValidate" :disabled="validating">✓ Validate</button>
+            <button @click="doValidate" :disabled="validating">✓ Validate (Camoufox)</button>
             <button class="run" @click="run" :disabled="running">▶ Run</button>
           </div>
+        </div>
+
+        <!-- local on-page test results (real tab) -->
+        <div v-if="testCounts" class="testc">
+          <strong>👁 On-page matches</strong>
+          <span v-for="(c,ci) in testCounts" :key="ci" class="chip" :class="{zero:c.count===0}">{{ c.label||c.selector }}: {{ c.count }}</span>
+        </div>
+
+        <!-- server dry-run preview rows (Camoufox) -->
+        <div v-if="validateRows" class="out">
+          <strong>Validate preview — {{ validateRows.rows.length }} row(s)</strong>
+          <div v-if="!validateRows.rows.length" class="muted">no rows (selectors matched nothing through Camoufox)</div>
+          <table v-else class="ftab">
+            <tr><th v-for="c in validateRows.columns" :key="c">{{ c }}</th></tr>
+            <tr v-for="(r,ri) in validateRows.rows.slice(0,10)" :key="ri"><td v-for="c in validateRows.columns" :key="c">{{ r[c] }}</td></tr>
+          </table>
         </div>
 
         <div v-if="execId" class="exec">
@@ -482,6 +548,10 @@ button.rec { background: #fecaca; }
 .settings label { margin-right: 12px; }
 .warn { color: #92400e; background: #fef3c7; border-radius: 6px; padding: 6px; margin: 6px 0 0; font-size: 12px; }
 .yaml { background: #0d0f1c; color: #d4d4d4; padding: 10px; border-radius: 8px; overflow-x: auto; font: 11px/1.5 ui-monospace, monospace; white-space: pre; }
+.out { margin-top: 8px; } .out table { font-size: 11px; }
+.testc { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.testc .chip { font-size: 11px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 999px; padding: 1px 8px; }
+.testc .chip.zero { background: #fee2e2; border-color: #fecaca; color: #b91c1c; }
 .exec { margin-top: 8px; border-top: 1px solid #e6e8ef; padding-top: 8px; }
 .exec .ok { color: #16a34a; font-weight: 700; } .exec .bad { color: #dc2626; font-weight: 700; }
 .logs { background: #111; color: #9fe; padding: 8px; border-radius: 6px; max-height: 180px; overflow: auto; font: 11px/1.4 ui-monospace, monospace; }

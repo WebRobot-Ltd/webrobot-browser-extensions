@@ -41,6 +41,69 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((e) => sendResponse({ error: String(e) }));
     return true;
   }
+  // Replay a recorded trace on the REAL page so the user SEES the actions
+  // execute (click/input/hover/scroll/wait) — same trace fetch replays on
+  // Camoufox at run time. Returns per-step results.
+  if (msg.__wr_cmd === 'run-trace') {
+    api.scripting.executeScript({
+      target: { tabId: msg.tabId },
+      args: [msg.actions || []],
+      func: async (actions) => {
+        const out = []
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+        for (const a of actions) {
+          try {
+            if (a.type === 'Wait') { await sleep(a.ms || 1000); out.push('wait'); continue }
+            if (a.type === 'Scroll') { window.scrollBy(0, Number(a.y || 600)); out.push('scroll'); await sleep(300); continue }
+            const el = a.selector ? document.querySelector(a.selector) : null
+            if (!el) { out.push('miss:' + (a.selector || a.type)); continue }
+            el.scrollIntoView({ block: 'center' })
+            if (a.type === 'Type') {
+              el.focus(); el.value = a.text || ''
+              el.dispatchEvent(new Event('input', { bubbles: true }))
+              el.dispatchEvent(new Event('change', { bubbles: true }))
+              out.push('type')
+            } else if (a.type === 'Hover') {
+              el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+              out.push('hover')
+            } else { el.click(); out.push('click') }
+            await sleep(500)
+          } catch (e) { out.push('err:' + (e && e.message)) }
+        }
+        return out
+      },
+    }).then((r) => sendResponse({ ok: true, steps: (r && r[0] && r[0].result) || [] }))
+      .catch((e) => sendResponse({ ok: false, error: String(e) }))
+    return true
+  }
+  // Highlight selector matches on the REAL page (any stage) + return match
+  // counts, so the user SEES what each selector/segment/field captures.
+  if (msg.__wr_cmd === 'highlight') {
+    api.scripting.executeScript({
+      target: { tabId: msg.tabId },
+      args: [msg.items || [], msg.scope || null],
+      func: (items, scopeSel) => {
+        document.querySelectorAll('[data-wr-hl]').forEach(e => { e.style.outline = ''; e.removeAttribute('data-wr-hl') })
+        const scope = scopeSel ? document.querySelector(scopeSel) : document
+        const counts = []
+        for (const it of items) {
+          let n = 0
+          try {
+            const root = (it.relativeToScope && scope !== document) ? scope : document
+            const els = (root || document).querySelectorAll(it.selector)
+            n = els.length
+            els.forEach(e => { e.setAttribute('data-wr-hl', '1'); e.style.outline = `2px solid ${it.color || '#4f46e5'}`; e.style.outlineOffset = '1px' })
+            if (els[0]) els[0].scrollIntoView({ block: 'center' })
+          } catch (_) {}
+          counts.push({ selector: it.selector, label: it.label || '', count: n })
+        }
+        setTimeout(() => { document.querySelectorAll('[data-wr-hl]').forEach(e => { e.style.outline = ''; e.removeAttribute('data-wr-hl') }) }, 5000)
+        return counts
+      },
+    }).then((r) => sendResponse({ ok: true, counts: (r && r[0] && r[0].result) || [] }))
+      .catch((e) => sendResponse({ ok: false, error: String(e) }))
+    return true
+  }
   // Grab the live page HTML (whole page, or one selector's outerHTML) for AI
   // Magic — uses the user's REAL rendered page (no Camoufox needed for picking).
   if (msg.__wr_cmd === 'page-html') {
