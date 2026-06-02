@@ -410,6 +410,10 @@ async function replayTrace(i) {
   try { const r = await runTrace(t); status.value = '▶ Replay done: ' + ((r.steps || []).join(', ') || 'no steps') }
   catch (e) { status.value = 'Replay error: ' + e.message }
 }
+// Templatize (future): detect candidate variables in the pipeline (values that
+// could be parameterized) and bind them to dataset columns → reusable template
+// to publish on the marketplace. Button + coming-soon notice for now.
+const showTpl = ref(false)
 // ── Run modal (mirrors the demo app's "run pipeline" dialog) ──
 const showRunModal = ref(false)
 const runMode = ref('none')        // 'none' (auto-trigger) | 'existing' | 'upload'
@@ -601,6 +605,12 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
           <div class="row">
             <button @click="doValidate" :disabled="validating">✓ Validate (Camoufox)</button>
             <button class="run" @click="openRunModal" :disabled="running">▶ Run</button>
+            <button @click="showTpl=true" title="Turn this pipeline into a reusable template and publish it on the marketplace">📦 Templatize</button>
+          </div>
+          <div v-if="showTpl" class="cs">
+            🚧 <strong>Templatize &amp; publish — coming soon.</strong>
+            <span>Detects candidate variables in the pipeline (e.g. a search keyword or URL part) and binds them to <strong>dataset columns</strong> ($col), turning the pipeline into a reusable template to publish on the WebRobot marketplace.</span>
+            <button @click="showTpl=false">Got it</button>
           </div>
         </div>
 
