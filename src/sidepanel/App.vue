@@ -481,12 +481,22 @@ async function runConfirm() {
     status.value = 'Running ' + id; poll()
   } catch (e) { running.value = false; execState.value = 'error'; status.value = 'Run error: ' + e.message }
 }
+function refreshStatus() { if (!execId.value) return; if (pollTimer) clearTimeout(pollTimer); poll() }
 async function poll() {
   try {
     const s = await executionStatus(execId.value)
     execInfo.value = (s && typeof s === 'object') ? s : null
-    execState.value = (s && (s.status || s.phase)) || 'UNKNOWN'
-    const done = /SUCCEED|COMPLETE|FAIL|ERROR|KILLED/i.test(execState.value)
+    let st = (s && (s.status || s.phase)) || 'UNKNOWN'
+    // The demo_execution DB status lags when the completion webhook doesn't
+    // fire (known SPOF) → "stuck RUNNING". Trust the driver pod's terminal
+    // phase from the kube enrichment instead.
+    const drv = (s && s.driver) || {}
+    const dph = String(drv.phase || '').toLowerCase()
+    const drsn = String(drv.reason || '').toLowerCase()
+    if (dph === 'failed' || /error|crashloopbackoff|backoff/.test(drsn)) st = 'FAILED'
+    else if (dph === 'succeeded' && /running|unknown|submitting|pending/i.test(st)) st = 'SUCCEEDED'
+    execState.value = st
+    const done = /SUCCEED|COMPLETE|FAIL|ERROR|KILLED/i.test(st)
     try { const l = await executionLogs(execId.value); execLogs.value = (typeof l === 'string' ? l : (l.logs || JSON.stringify(l))).slice(-6000) } catch (_) {}
     if (done) {
       running.value = false
@@ -708,6 +718,7 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
           <strong>Job</strong> <code>{{ execId }}</code>
           <span class="state" :class="{ok:/SUCCEED|COMPLETE/i.test(execState), bad:/FAIL|ERROR|KILLED/i.test(execState)}">{{ execState }}</span>
           <span class="sp"></span>
+          <button @click="refreshStatus">↻ Refresh</button>
           <button @click="showExec=false">✕</button>
         </div>
         <div v-if="execInfo" class="kube">
