@@ -38,6 +38,14 @@ export const validatePipeline  = (body)        => post('/demo/wizard/validate', 
 // Run: save the built YAML + execute in one call (Save & Run), then poll.
 export const saveGeneratedPipeline = (body)    => post('/demo/save-generated-pipeline', body);
 export const executeDemo       = (name, body)  => post(`/demo/execute/${encodeURIComponent(name)}`, body);
+// Run an already-saved pipeline by name → { execution_id, output_dataset_id }.
+export const executeByName     = (name, params) => post(`/demo/execute/${encodeURIComponent(name)}`, { parameters: params || { limit: 10 } });
+// Upload a CSV as the input dataset (multipart via background) → { datasetId }.
+export async function uploadCsv(name, csv, filename) {
+  const r = await ext.runtime.sendMessage({ __wr_cmd: 'upload-csv', name, csv, filename });
+  if (!r) throw new Error('no response'); if (r.error) throw new Error(r.error);
+  if (!r.ok) throw new Error(`upload → ${r.status}`); return r.body;
+}
 export const executionStatus   = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/status`);
 export const executionLogs     = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/logs`);
 export const executionOutput   = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/output`);

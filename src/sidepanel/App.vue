@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
   catalogStages, getToken, setToken, startPicker, onPick, sendToPicker,
   inferSegment, inferSelector, inferFields, inferOddsStructure, suggestFieldNames,
-  relaxSelectors, validatePipeline, saveGeneratedPipeline,
+  relaxSelectors, validatePipeline, saveGeneratedPipeline, executeByName, uploadCsv,
   executionStatus, executionLogs, executionOutput, currentUrl, pageHtml,
   runTrace, highlight, recStart, recStop,
 } from './api.js'
@@ -410,33 +410,41 @@ async function replayTrace(i) {
   try { const r = await runTrace(t); status.value = '▶ Replay done: ' + ((r.steps || []).join(', ') || 'no steps') }
   catch (e) { status.value = 'Replay error: ' + e.message }
 }
-async function run() {
+// ── Run modal (mirrors the demo app's "run pipeline" dialog) ──
+const showRunModal = ref(false)
+const runMode = ref('none')        // 'none' (auto-trigger) | 'existing' | 'upload'
+const runCsvText = ref('')
+function openRunModal() {
+  if (!pipeline.value.length) { status.value = 'Add at least one stage first.'; return }
+  showRunModal.value = true
+}
+async function runConfirm() {
   const name = (wizName.value || '').trim()
   if (!name) { status.value = 'Give the pipeline a name first.'; return }
-  running.value = true; execRows.value = null; execLogs.value = ''; execState.value = 'saving'; status.value = 'Saving + submitting…'
+  showRunModal.value = false
+  running.value = true; execRows.value = null; execLogs.value = ''; execState.value = 'saving'; status.value = 'Saving…'
   try {
-    // Save the built pipeline + execute, mirroring DemoApp's wizard run:
-    // save-generated-pipeline {pipeline_name, pipeline_yaml, execute, datasetId?}
-    // → { execution:{execution_id, output_dataset_id}, execution_error? }.
-    const body = { pipeline_name: name, pipeline_yaml: wizYaml.value, execute: true }
-    if (wizDatasetId.value && wizDatasetId.value.trim()) body.datasetId = wizDatasetId.value.trim()
-    const j = await saveGeneratedPipeline(body)
-    // Backend rejected execution (most commonly: pipeline needs an input dataset).
-    if (j.execution_error) {
-      running.value = false; execState.value = 'error'
-      status.value = /input dataset is required/i.test(j.execution_error)
-        ? 'Saved, but this pipeline needs an input dataset (load_csv). Set the dataset id field, or remove the CSV step.'
-        : 'Saved but execution failed: ' + j.execution_error
-      return
+    // 1) Save the built pipeline (draft) so an agent exists to run / attach to.
+    await saveGeneratedPipeline({ pipeline_name: name, pipeline_yaml: wizYaml.value, execute: false })
+    // 2) Resolve the input dataset per the chosen mode.
+    let datasetId = null
+    if (runMode.value === 'existing') {
+      datasetId = (wizDatasetId.value || '').trim() || null
+    } else if (runMode.value === 'upload') {
+      if (!runCsvText.value.trim()) { running.value = false; status.value = 'Paste CSV (or pick No dataset).'; return }
+      status.value = 'Uploading dataset…'
+      datasetId = (await uploadCsv(name, runCsvText.value, 'input.csv')).datasetId
+    } else { // 'none' → 1-row trigger CSV (load_csv has a row to fan out from)
+      status.value = 'Attaching trigger dataset…'
+      datasetId = (await uploadCsv(name, 'trigger\ngo\n', 'trigger.csv')).datasetId
     }
-    const ex = j.execution || {}
-    const id = ex.execution_id || j.execution_id
-    if (!id) {
-      running.value = false; execState.value = 'error'
-      status.value = 'Saved but no execution_id returned — check Jersey logs.'
-      return
-    }
-    execId.value = id; outDatasetId.value = ex.output_dataset_id || null
+    // 3) Execute by name.
+    status.value = 'Submitting…'; execState.value = 'submitting'
+    const params = { limit: 10 }; if (datasetId) params.datasetId = datasetId
+    const r = await executeByName(name, params)
+    const id = r.execution_id || (r.execution && r.execution.execution_id)
+    if (!id) { running.value = false; execState.value = 'error'; status.value = 'No execution_id: ' + (r.error || JSON.stringify(r).slice(0, 200)); return }
+    execId.value = id; outDatasetId.value = r.output_dataset_id || null
     status.value = 'Running ' + id; poll()
   } catch (e) { running.value = false; execState.value = 'error'; status.value = 'Run error: ' + e.message }
 }
@@ -485,7 +493,6 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
         <div class="pmeta">
           <input v-model="wizName" class="name" placeholder="pipeline name *" />
           <input v-model="wizCategory" class="name" placeholder="category (optional)" />
-          <input v-model="wizDatasetId" class="name" placeholder="input dataset id (optional)" />
         </div>
         <p v-if="!pipeline.length" class="muted">Click stages to build the pipeline.</p>
 
@@ -593,7 +600,7 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
           <pre class="yaml">{{ wizYaml }}</pre>
           <div class="row">
             <button @click="doValidate" :disabled="validating">✓ Validate (Camoufox)</button>
-            <button class="run" @click="run" :disabled="running">▶ Run</button>
+            <button class="run" @click="openRunModal" :disabled="running">▶ Run</button>
           </div>
         </div>
 
@@ -622,6 +629,26 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
           </div>
         </div>
       </section>
+    </div>
+
+    <!-- Run modal — choose the input dataset like the demo app's run dialog -->
+    <div v-if="showRunModal" class="modal-bg" @click.self="showRunModal=false">
+      <div class="modal">
+        <h3>▶ Run pipeline</h3>
+        <label class="ml">Name<input v-model="wizName" placeholder="pipeline name *"></label>
+        <label class="ml">Category<input v-model="wizCategory" placeholder="optional"></label>
+        <div class="ml"><strong>Input dataset</strong></div>
+        <label class="radio"><input type="radio" value="none" v-model="runMode"> 🚀 No dataset (auto-trigger)</label>
+        <label class="radio"><input type="radio" value="existing" v-model="runMode"> 🔢 Existing dataset id</label>
+        <input v-if="runMode==='existing'" v-model="wizDatasetId" class="ml" placeholder="dataset id">
+        <label class="radio"><input type="radio" value="upload" v-model="runMode"> 📄 Paste CSV</label>
+        <textarea v-if="runMode==='upload'" v-model="runCsvText" class="ml" rows="4" placeholder="col1,col2&#10;a,b"></textarea>
+        <p class="muted small" v-if="runMode==='none'">A 1-row trigger CSV is attached so a <code>load_csv</code> stage has a row to fan out from. Use this for pipelines that seed from a literal URL.</p>
+        <div class="modal-actions">
+          <button @click="showRunModal=false">Cancel</button>
+          <button class="run" @click="runConfirm">▶ Run</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -686,4 +713,11 @@ button.rec { background: #fecaca; }
 .exec .ok { color: #16a34a; font-weight: 700; } .exec .bad { color: #dc2626; font-weight: 700; }
 .logs { background: #111; color: #9fe; padding: 8px; border-radius: 6px; max-height: 180px; overflow: auto; font: 11px/1.4 ui-monospace, monospace; }
 h4 { margin: 8px 0 4px; }
+.modal-bg { position: fixed; inset: 0; background: rgba(15,18,34,.45); display: grid; place-items: center; z-index: 9999; }
+.modal { background: #fff; border-radius: 12px; padding: 16px; width: 88%; max-width: 360px; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+.modal h3 { margin: 0 0 10px; }
+.modal .ml { display: block; margin: 6px 0; }
+.modal .ml input, .modal .ml textarea { width: 100%; }
+.modal .radio { display: flex; align-items: center; gap: 6px; margin: 4px 0; font-size: 12px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 </style>

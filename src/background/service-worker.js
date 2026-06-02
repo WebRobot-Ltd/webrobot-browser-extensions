@@ -38,6 +38,11 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     apiFetch(msg.path, msg.init).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
     return true; // async
   }
+  // Upload a CSV (multipart) as the pipeline's input dataset → { datasetId }.
+  if (msg.__wr_cmd === 'upload-csv') {
+    uploadCsv(msg.name, msg.csv, msg.filename).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
   // Current active-tab URL (fetch/visit "use current URL").
   if (msg.__wr_cmd === 'current-url') {
     api.tabs.query({ active: true, currentWindow: true })
@@ -168,6 +173,24 @@ async function demoToken(force) {
     if (t) await api.storage.local.set({ demo_jwt: t });
     return t;
   } catch (_) { return ''; }
+}
+
+// Multipart CSV upload (FormData can't go through the JSON proxy). Same demo
+// auth + 401-refresh. Returns the parsed body ({ datasetId, ... }).
+async function uploadCsv(name, csv, filename) {
+  const url = API_BASE + '/api/webrobot/api/demo/upload-dataset/' + encodeURIComponent(name);
+  async function once(bearer) {
+    const fd = new FormData();
+    fd.append('file', new Blob([csv || ''], { type: 'text/csv' }), filename || 'input.csv');
+    const res = await fetch(url, { method: 'POST', headers: bearer ? { Authorization: 'Bearer ' + bearer } : {}, body: fd });
+    const text = await res.text(); let body; try { body = JSON.parse(text); } catch (_) { body = text; }
+    return { status: res.status, ok: res.ok, body };
+  }
+  const { token } = await api.storage.local.get('token');
+  let bearer = token || await demoToken(false);
+  let r = await once(bearer);
+  if (r.status === 401 && !token) { bearer = await demoToken(true); r = await once(bearer); }
+  return r;
 }
 
 // Thin proxy for the WebRobot REST API. Auth precedence: user-supplied token
