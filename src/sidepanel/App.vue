@@ -47,6 +47,66 @@ async function loadCatalog() {
 const specFor = (n) => stages.value.find(s => s.stage_name === n || (s.aliases || []).includes(n))
 const argSchema = (n) => (specFor(n) || {}).arg_schema || []
 
+// ── catalog grouped by category (parity with DemoApp.vue palette) ──
+const CATEGORY_ORDER = [
+  'source', 'io', 'connector', 'external-api',
+  'crawling', 'browsing', 'intelligent',
+  'extraction', 'matching',
+  'transformation', 'python', 'utility',
+  'analytics', 'rag', 'ml',
+  'sink', 'output',
+  'use-case',
+]
+const CATEGORY_LABELS = {
+  'source': '📥 Sources', 'io': '📂 I/O', 'connector': '🔌 Connectors',
+  'external-api': '🌐 External APIs', 'crawling': '🕷 Crawling', 'browsing': '🌍 Browsing',
+  'intelligent': '🪄 Intelligent (LLM)', 'extraction': '🎯 Extraction', 'matching': '🔗 Matching',
+  'transformation': '🔧 Transformation', 'python': '🐍 Python', 'utility': '🔩 Utility',
+  'analytics': '📊 Analytics', 'rag': '🧠 RAG', 'ml': '🤖 ML',
+  'sink': '💾 Sinks', 'output': '📤 Output', 'use-case': '📦 Use cases',
+  'Uncategorized': '· Other',
+}
+// Use the catalog `category` when present; otherwise infer from stage_name/plugin_id.
+function inferStageCategory(s) {
+  if (!s) return 'Uncategorized'
+  if (s.category && String(s.category).trim()) return String(s.category).trim()
+  const name = (s.stage_name || '').toLowerCase()
+  const plug = (s.plugin_id || '').toLowerCase()
+  if (plug.includes('rag')) return 'rag'
+  if (plug.includes('sentiment') || plug.includes('price-comparison') || plug.includes('real-estate') || plug.includes('lead')) return 'use-case'
+  if (plug.includes('python')) return 'python'
+  if (/^load_|^read_|^fetch_csv$|^from_/.test(name)) return 'io'
+  if (/^save_|^write_|^to_/.test(name)) return 'io'
+  if (name.includes('fetch') || name.includes('visit') || name.includes('wget') || name.includes('explore') || name.includes('crawl')) return 'crawling'
+  if (name.includes('intelligent') || name.includes('aimagic') || name.endsWith('_ai')) return 'intelligent'
+  if (name.includes('extract') || name === 'flatselect' || name === 'iextract') return 'extraction'
+  if (name.includes('join') || name.includes('match')) return 'matching'
+  if (name.includes('sentiment') || name.includes('aggregate')) return 'analytics'
+  if (name.includes('rag') || name.includes('embed') || name.includes('vector')) return 'rag'
+  if (name.includes('python') || name.includes('udf')) return 'python'
+  if (name.includes('api') || name.endsWith('api') || name.startsWith('macro')) return 'external-api'
+  if (name.includes('filter') || name.includes('sort') || name.includes('limit') || name.includes('dedupe')) return 'utility'
+  if (name.includes('connector') || /^mysql|^postgres|^mongo|^kafka|^elastic|^cassandra/.test(name)) return 'connector'
+  return 'Uncategorized'
+}
+const catalogGroups = computed(() => {
+  const map = new Map()
+  for (const s of filtered.value) {
+    const cat = inferStageCategory(s)
+    if (!map.has(cat)) map.set(cat, [])
+    map.get(cat).push(s)
+  }
+  for (const items of map.values()) items.sort((a, b) => a.stage_name.localeCompare(b.stage_name))
+  const groups = []
+  for (const known of CATEGORY_ORDER) {
+    if (map.has(known)) { groups.push({ category: known, items: map.get(known) }); map.delete(known) }
+  }
+  const rest = Array.from(map.entries()).filter(([c]) => c !== 'Uncategorized').sort((a, b) => a[0].localeCompare(b[0]))
+  for (const [cat, items] of rest) groups.push({ category: cat, items })
+  if (map.has('Uncategorized')) groups.push({ category: 'Uncategorized', items: map.get('Uncategorized') })
+  return groups.map(g => ({ ...g, label: CATEGORY_LABELS[g.category] || ('· ' + g.category) }))
+})
+
 // ── pipeline ──
 const pipeline = ref([])
 const wizName = ref('extension-pipeline')
@@ -657,7 +717,10 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
       <section class="palette">
         <input v-model="search" placeholder="filter stages…" />
         <div class="plist">
-          <button v-for="s in filtered" :key="s.stage_name" class="pitem" :title="s.description" @click="addStage(s)">{{ s.stage_name }}</button>
+          <template v-for="g in catalogGroups" :key="g.category">
+            <div class="pcat">{{ g.label }} <span class="pcat-n">{{ g.items.length }}</span></div>
+            <button v-for="s in g.items" :key="s.stage_name" class="pitem" :title="s.description" @click="addStage(s)">{{ s.stage_name }}</button>
+          </template>
         </div>
       </section>
 
@@ -923,6 +986,9 @@ button.rec:hover { background: linear-gradient(180deg,#fdb9bf,#f98a92); }
 .plist { display: flex; flex-direction: column; gap: 4px; max-height: 74vh; overflow: auto; padding-right: 2px; }
 .pitem { text-align: left; font-size: 12px; padding: 6px 9px; border-radius: 8px; }
 .pitem:hover { transform: translateX(2px); border-color: #b9a9fb; }
+.pcat { display: flex; align-items: center; justify-content: space-between; gap: 4px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: #6b7280; margin: 8px 2px 1px; padding-bottom: 2px; border-bottom: 1px solid #e6e8ef; position: sticky; top: 0; background: #fff; z-index: 1; }
+.pcat:first-child { margin-top: 0; }
+.pcat-n { font-weight: 600; color: #a8adbd; background: #f1f2f9; border-radius: 999px; padding: 0 6px; font-size: 10px; }
 .editor { flex: 1; min-width: 0; }
 .pmeta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
 .pmeta .name { flex: 1; min-width: 120px; margin: 0; }
