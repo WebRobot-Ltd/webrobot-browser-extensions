@@ -75,6 +75,10 @@
   // the page natively to solve it) and a red banner offers Resume.
   var blockInfo = null;
   var actions = [];                // ACTION mode buffer
+  // EXTENSION: restore the in-progress recording after a real-page navigation
+  // (the content script is re-injected on the new page; the buffer survives in
+  // sessionStorage so multi-page traces keep accumulating).
+  try { var __wrRec = sessionStorage.getItem('__wr_rec'); if (__wrRec) actions = JSON.parse(__wrRec) || []; } catch (_) {}
   var lastInputTime = 0;
   var lastInputTarget = null;
   // MULTI-FIELD mode state.
@@ -241,6 +245,7 @@
       pickerActive = false;
       try { window.__wrPickerOff = true; } catch (_) {}   // sync flag — see Replay
       actions = [];                 // reset recording buffer for the next session
+      try { sessionStorage.removeItem('__wr_rec'); } catch (_) {}
       try { lcaFirst = null; } catch (_) {}
       try { if (typeof clearHover === 'function') clearHover(); } catch (_) {}
       try { if (banner) banner.style.display = 'none'; } catch (_) {}
@@ -607,6 +612,7 @@
   // handler below still stages/picks. Banner UI and captcha flow are exempt.
   document.addEventListener('click', function (e) {
     if (!pickerActive || window.__wrPickerOff) return; // EXTENSION: idle → let links navigate normally
+    if (mode === 'action-record') return; // EXTENSION: recording → let the page navigate (we record + persist)
     if (e.target === banner || (banner && banner.contains(e.target))) return;
     if (blockInfo) return; // captcha: let the challenge widget handle clicks
     var navAnchor = e.target && e.target.closest ? e.target.closest('a[href]') : null;
@@ -671,9 +677,10 @@
       //     plus AUTO-SEND. That click is the user's "commit" gesture
       //     for whatever they typed and clicked before, and replays
       //     the whole queue on Camoufox.
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
+      // EXTENSION: do NOT block navigation while recording — let the click act
+      // on the REAL page so the user advances to the next page. We record it
+      // first and persist the queue across the navigation (sessionStorage),
+      // and the background re-injects the picker on the new page to continue.
       var tag = (e.target && e.target.tagName || '').toLowerCase();
       var editable = tag === 'input' || tag === 'textarea'
                   || (e.target && e.target.isContentEditable);
@@ -710,6 +717,7 @@
       // Always tell the parent the new queue length so the "▶ Send"
       // count updates.
       send({ type: 'webrobot-pick-actions', actions: actions });
+      try { sessionStorage.setItem('__wr_rec', JSON.stringify(actions)); } catch (_) {} // survive navigation
       // NOTE: previous behaviour auto-committed the queue here on every
       // non-editable click ("submit-style" auto-send). Removed by user
       // request — the explicit "▶ Send to Camoufox" button is now the

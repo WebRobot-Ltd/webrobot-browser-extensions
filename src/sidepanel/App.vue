@@ -5,7 +5,7 @@ import {
   inferSegment, inferSelector, inferFields, inferOddsStructure, suggestFieldNames,
   relaxSelectors, validatePipeline, saveGeneratedPipeline,
   executionStatus, executionLogs, executionOutput, currentUrl, pageHtml,
-  runTrace, highlight,
+  runTrace, highlight, recStart, recStop,
 } from './api.js'
 
 /* WebRobot Pipeline Designer — browser-extension port of DemoApp.vue.
@@ -104,9 +104,10 @@ const pickFields = (i) => beginPick({ stageIdx: i, kind: 'field-multi' }, 'multi
 const pickRowLca = (i, name) => beginPick({ stageIdx: i, kind: 'arg', argName: name }, 'selector-single')
 const pickMarketBox = (i) => beginPick({ stageIdx: i, kind: 'market-box' }, 'selector-single')
 const pickMacroBox = (i) => beginPick({ stageIdx: i, kind: 'macro-box' }, 'selector-single')
-async function recordTrace(i) { recording.value = i; traceStage.value = i; pipeline.value[i]._trace = []; touch(); await beginPick({ stageIdx: i, kind: 'trace' }, 'action-record') }
+async function recordTrace(i) { recording.value = i; traceStage.value = i; pipeline.value[i]._trace = []; touch(); await beginPick({ stageIdx: i, kind: 'trace' }, 'action-record'); await recStart(pickTab) }
 async function stopRecord(i) {
   await sendToPicker(pickTab, { type: 'webrobot-picker-stop-recording' }) // → emits webrobot-pick-actions
+  await recStop()                  // stop multi-page re-injection
   recording.value = null
   await sleep(300)                 // let pick-actions round-trip back before we deactivate
   await deactivatePicker()         // pt reset is safe — trace routes via traceStage

@@ -30,6 +30,10 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     api.tabs.sendMessage(msg.tabId, { __wr_to_picker: true, payload: msg.payload }).catch(() => {});
     return;
   }
+  // Trace recording session: remember the tab so we can re-inject the picker
+  // after the page navigates and KEEP recording (multi-page traces).
+  if (msg.__wr_cmd === 'rec-start') { recordingTab = msg.tabId; return; }
+  if (msg.__wr_cmd === 'rec-stop')  { recordingTab = null; return; }
   if (msg.__wr_cmd === 'api') {
     apiFetch(msg.path, msg.init).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
     return true; // async
@@ -121,6 +125,19 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((e) => sendResponse({ error: String(e) }));
     return true;
   }
+});
+
+// Multi-page recording: when the recording tab navigates, re-inject the picker
+// + bridge on the new page and re-arm action-record. The picker restores its
+// queue from sessionStorage (same-origin), so the trace keeps accumulating.
+let recordingTab = null;
+api.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+  if (tabId !== recordingTab || changeInfo.status !== 'complete') return;
+  try {
+    await injectPicker(tabId);
+    await new Promise(r => setTimeout(r, 120));
+    await api.tabs.sendMessage(tabId, { __wr_to_picker: true, payload: { type: 'webrobot-picker-mode', mode: 'action-record' } });
+  } catch (_) {}
 });
 
 async function injectPicker(tabId) {

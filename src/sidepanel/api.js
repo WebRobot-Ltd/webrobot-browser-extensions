@@ -64,6 +64,10 @@ export async function currentUrl() {
   const r = await ext.runtime.sendMessage({ __wr_cmd: 'current-url' });
   return (r && r.url) || '';
 }
+/** Mark/unmark a tab as the active recording session (background re-injects the
+ *  picker on navigation so multi-page traces keep recording). */
+export async function recStart(tabId) { const id = tabId ?? await activeTabId(); await ext.runtime.sendMessage({ __wr_cmd: 'rec-start', tabId: id }) }
+export async function recStop() { await ext.runtime.sendMessage({ __wr_cmd: 'rec-stop' }) }
 /** Replay a recorded trace on the REAL page (local — no Camoufox). */
 export async function runTrace(actions) {
   const tabId = await activeTabId()
