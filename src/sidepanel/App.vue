@@ -7,6 +7,7 @@ import {
   executionStatus, executionLogs, executionOutput, currentUrl, pageHtml,
   runTrace, highlight, recStart, recStop,
 } from './api.js'
+import logoUrl from './logo-webrobot.png'
 
 /* WebRobot Pipeline Designer — browser-extension port of DemoApp.vue.
    Full picker (single / multi-field / multi-sample / row-lca / action-record /
@@ -455,7 +456,7 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
 
 <template>
   <div class="wrap">
-    <header><strong>WebRobot Designer</strong><span class="muted">extension</span></header>
+    <header><img :src="logoUrl" alt="WebRobot" class="logo"><span class="muted">Designer</span></header>
     <div class="row modebar">
       <span class="seg">
         <button :class="{active: mode==='demo'}" @click="mode='demo'">Demo</button>
@@ -629,7 +630,8 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
 * { box-sizing: border-box; }
 body { margin: 0; font: 13px/1.45 system-ui, sans-serif; color: #1f2430; }
 .wrap { padding: 10px; }
-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.logo { height: 22px; width: auto; }
 .muted { color: #888; }
 .row { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
 .row input[type=password] { flex: 1; }
