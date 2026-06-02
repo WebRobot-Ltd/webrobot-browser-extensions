@@ -296,6 +296,30 @@ function traceToYaml(a) {
   return null
 }
 const fmtAction = (a) => !a || !a.type ? '' : a.type === 'Click' ? `Click("${a.selector}")` : a.type === 'Type' ? `Type("${a.selector}","${a.text || ''}")` : a.type === 'Hover' ? `Hover("${a.selector}")` : a.type === 'Scroll' ? `Scroll(${a.y || 0})` : `${a.type}()`
+// Client-side pre-validation: block Run when required inputs are missing
+// (e.g. a fetch with no URL, a flatSelect with no row selector/fields).
+const pipelineIssues = computed(() => {
+  const out = []
+  if (!pipeline.value.length) return out
+  pipeline.value.forEach((row, i) => {
+    const n = i + 1, name = row.stage_name
+    const has = (k) => (row.args[k] != null && String(row.args[k]).trim() !== '')
+    if (name === 'extract') {
+      if (!(row._fields || []).some(f => (f.selector || '').trim())) out.push(`${n}. extract — add at least one field`)
+    } else if (name === 'flatSelect') {
+      if (!has(segArgName(row))) out.push(`${n}. flatSelect — set the row/segment selector`)
+      if (!(row._fields || []).some(f => (f.selector || '').trim())) out.push(`${n}. flatSelect — add at least one field`)
+    } else if (isOdds(name)) {
+      const ok = (row._markets || []).some(m => m && m.enabled !== false && (m.sectionSelector || '').trim() && (m.fields || []).some(f => (f.selector || '').trim()))
+      if (!ok) out.push(`${n}. oddsSelect — add an enabled market with a section + fields`)
+    } else {
+      for (const a of argSchema(name)) {
+        if (a.required && !has(a.name)) out.push(`${n}. ${name} — missing "${a.name}"`)
+      }
+    }
+  })
+  return out
+})
 const wizYaml = computed(() => buildYaml())
 function buildYaml() {
   const p = pipeline.value; if (!p.length) return '(add at least one stage)'
@@ -422,6 +446,7 @@ const runMode = ref('none')        // 'none' (auto-trigger) | 'existing' | 'uplo
 const runCsvText = ref('')
 function openRunModal() {
   if (!pipeline.value.length) { status.value = 'Add at least one stage first.'; return }
+  if (pipelineIssues.value.length) { status.value = '⚠ Fix ' + pipelineIssues.value.length + ' issue(s) before running.'; return }
   clearSelections()   // clear page highlights + release the picker before running
   showRunModal.value = true
 }
@@ -636,9 +661,13 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
         <div v-if="pipeline.length">
           <h4>YAML</h4>
           <pre class="yaml">{{ wizYaml }}</pre>
+          <div v-if="pipelineIssues.length" class="issues">
+            ⚠ <strong>Fix before running:</strong>
+            <ul><li v-for="(m, k) in pipelineIssues" :key="k">{{ m }}</li></ul>
+          </div>
           <div class="row">
             <button @click="doValidate" :disabled="validating">✓ Validate (Camoufox)</button>
-            <button class="run" @click="openRunModal" :disabled="running">▶ Run</button>
+            <button class="run" @click="openRunModal" :disabled="running || pipelineIssues.length>0" :title="pipelineIssues.length ? 'Fix the issues above first' : 'Run the pipeline'">▶ Run</button>
             <button @click="showTpl=true" title="Turn this pipeline into a reusable template and publish it on the marketplace">📦 Templatize</button>
           </div>
           <div v-if="showTpl" class="cs">
@@ -803,6 +832,9 @@ h4 { margin: 8px 0 4px; }
 .logs-lg { max-height: 46vh; }
 .out-scroll { max-height: 30vh; overflow: auto; }
 .dl { font-size: 11px; margin-left: 8px; font-weight: 400; }
+.issues { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; border-radius: 8px; padding: 8px; margin: 6px 0; font-size: 12px; }
+.issues ul { margin: 4px 0 0; padding-left: 18px; }
+button:disabled { opacity: .5; cursor: not-allowed; }
 .exec-chip { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; border-top: 1px solid #e6e8ef; padding-top: 8px; }
 .dotst { color: #f59e0b; } .dotst.ok { color: #16a34a; } .dotst.bad { color: #dc2626; }
 .kube { background: #f7f8fc; border: 1px solid #e6e8ef; border-radius: 8px; padding: 8px; margin: 4px 0; font-size: 12px; }
