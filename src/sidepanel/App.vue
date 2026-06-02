@@ -887,24 +887,42 @@ header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .muted { color: #888; }
 .row { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
 .row input[type=password] { flex: 1; }
-input, select { padding: 4px 6px; border: 1px solid #d4d7e2; border-radius: 6px; font: inherit; }
-button { padding: 4px 7px; border: 1px solid #c7cbe0; background: #f3f4fb; border-radius: 6px; cursor: pointer; }
-button:hover { background: #e9ebf7; } button.on { background: #ddd6fe; }
-button.run { background: linear-gradient(135deg,#4f46e5,#764ba2); color:#fff; border:0; }
-button.rec { background: #fecaca; }
+input, select { padding: 5px 8px; border: 1px solid #d4d7e2; border-radius: 7px; font: inherit; background: #fff; transition: border-color .15s, box-shadow .15s; }
+input:focus, select:focus { outline: 0; border-color: #8b85f0; box-shadow: 0 0 0 3px rgba(79,70,229,.15); }
+button {
+  padding: 5px 10px; border: 1px solid #d0d4e6; border-radius: 7px; cursor: pointer;
+  font: inherit; font-weight: 500; color: #2b3040;
+  background: linear-gradient(180deg,#ffffff,#f1f2f9);
+  box-shadow: 0 1px 1px rgba(20,24,60,.04), inset 0 1px 0 rgba(255,255,255,.6);
+  transition: background .15s, border-color .15s, box-shadow .12s, transform .06s;
+}
+button:hover { background: linear-gradient(180deg,#f6f7fc,#e9ebf7); border-color: #b9bed8; box-shadow: 0 2px 5px rgba(20,24,60,.08); }
+button:active { transform: translateY(1px); box-shadow: inset 0 1px 3px rgba(20,24,60,.12); }
+button:focus-visible { outline: 0; box-shadow: 0 0 0 3px rgba(79,70,229,.25); }
+button.on { background: linear-gradient(180deg,#e9e5ff,#ddd6fe); border-color: #b9a9fb; color: #4c1d95; box-shadow: inset 0 1px 2px rgba(76,29,149,.12); }
+button.run {
+  background: linear-gradient(135deg,#5b54ec,#7c4fb5); color:#fff; border:0; font-weight: 600;
+  box-shadow: 0 2px 8px rgba(79,70,229,.35), inset 0 1px 0 rgba(255,255,255,.25);
+}
+button.run:hover { background: linear-gradient(135deg,#4f46e5,#6d3fa6); box-shadow: 0 4px 14px rgba(79,70,229,.45); }
+button.rec { background: linear-gradient(180deg,#fecdd0,#fca5ab); border-color: #f59aaa; color: #9f1239; font-weight: 600; }
+button.rec:hover { background: linear-gradient(180deg,#fdb9bf,#f98a92); }
 .status { color: #4f46e5; font-size: 12px; margin: 4px 0; word-break: break-word; }
 .small { font-size: 11px; margin: 2px 0 6px; }
 .modebar { align-items: center; }
-.seg { display: inline-flex; border: 1px solid #c7cbe0; border-radius: 999px; overflow: hidden; }
-.seg button { border: 0; border-radius: 0; background: #fff; padding: 4px 12px; }
-.seg button.active { background: linear-gradient(135deg,#4f46e5,#764ba2); color: #fff; }
+.seg { display: inline-flex; border: 1px solid #c7cbe0; border-radius: 999px; overflow: hidden; padding: 2px; background: #eef0f8; gap: 2px; box-shadow: inset 0 1px 2px rgba(20,24,60,.06); }
+.seg button { border: 0; border-radius: 999px; background: transparent; padding: 4px 14px; box-shadow: none; font-weight: 600; color: #5b6072; }
+.seg button:hover { background: rgba(255,255,255,.7); box-shadow: none; }
+.seg button.active { background: linear-gradient(135deg,#5b54ec,#7c4fb5); color: #fff; box-shadow: 0 2px 6px rgba(79,70,229,.3); }
+.seg button.active:hover { background: linear-gradient(135deg,#5b54ec,#7c4fb5); }
 .cs { background: #fef3c7; border: 1px solid #fde68a; color: #92400e; border-radius: 8px; padding: 8px; margin: 4px 0 8px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .cs button[disabled] { opacity: .6; }
 .cols { display: flex; gap: 10px; align-items: flex-start; }
 .palette { width: 140px; flex: none; }
 .palette input { width: 100%; margin-bottom: 6px; }
-.plist { display: flex; flex-direction: column; gap: 3px; max-height: 74vh; overflow: auto; }
-.pitem { text-align: left; font-size: 12px; }
+.plist { display: flex; flex-direction: column; gap: 4px; max-height: 74vh; overflow: auto; padding-right: 2px; }
+.pitem { text-align: left; font-size: 12px; padding: 6px 9px; border-radius: 8px; }
+.pitem:hover { transform: translateX(2px); border-color: #b9a9fb; }
 .editor { flex: 1; min-width: 0; }
 .pmeta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
 .pmeta .name { flex: 1; min-width: 120px; margin: 0; }
