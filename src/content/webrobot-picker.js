@@ -509,6 +509,7 @@
     } catch (_) { return false; }
   }
   document.addEventListener('mouseover', function (e) {
+    if (!pickerActive || window.__wrPickerOff) return; // EXTENSION: idle → no hover capture/highlight
     if (e.target === banner || banner.contains(e.target)) return;
     if (blockInfo) return; // suspend during captcha resolution
     if (mode === 'action-record') {
@@ -576,6 +577,7 @@
   // Captcha path (blockInfo) intentionally lets submits through —
   // some challenge widgets submit a hidden form to finalize.
   document.addEventListener('submit', function (e) {
+    if (!pickerActive || window.__wrPickerOff) return; // EXTENSION: idle → let forms submit
     if (blockInfo) return;
     if (mode !== 'action-record') return;
     // Stage any pending Type, plus a synthetic "submit click" on the
@@ -597,9 +599,10 @@
     } catch (_) {}
     refreshBanner();
     send({ type: 'webrobot-pick-actions', actions: actions });
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
+    try { sessionStorage.setItem('__wr_rec', JSON.stringify(actions)); } catch (_) {}
+    // EXTENSION: do NOT block the submit — let the form navigate to the results
+    // page. The trace survives in sessionStorage; the background re-injects the
+    // picker on the new page so recording continues.
   }, true);
 
   // ── 3.9 Navigation guard (CAPTURE phase, runs BEFORE the page's own
