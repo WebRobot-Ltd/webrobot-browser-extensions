@@ -49,6 +49,7 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       target: { tabId: msg.tabId },
       args: [msg.actions || []],
       func: async (actions) => {
+        try { window.__wrPickerOff = true } catch (_) {} // disable picker interception synchronously (same isolated world)
         const out = []
         const sleep = (ms) => new Promise(r => setTimeout(r, ms))
         for (const a of actions) {

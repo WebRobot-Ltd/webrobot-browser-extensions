@@ -239,6 +239,7 @@
     // normally (and Replay can drive it). Clears banner + hover highlight.
     if (d.type === 'webrobot-picker-mode' && d.mode === 'off') {
       pickerActive = false;
+      try { window.__wrPickerOff = true; } catch (_) {}   // sync flag — see Replay
       actions = [];                 // reset recording buffer for the next session
       try { lcaFirst = null; } catch (_) {}
       try { if (typeof clearHover === 'function') clearHover(); } catch (_) {}
@@ -250,6 +251,7 @@
          d.mode === 'action-record'   || d.mode === 'multi-field' ||
          d.mode === 'multi-sample'    || d.mode === 'row-lca')) {
       pickerActive = true;
+      try { window.__wrPickerOff = false; } catch (_) {}
       try { if (banner) banner.style.display = ''; } catch (_) {}
       mode = d.mode;
       // Host tells us whether this stage FOLLOWS a link (explore/join/
@@ -604,7 +606,7 @@
   // present (it may be stripped). Propagation continues, so the bubble-phase
   // handler below still stages/picks. Banner UI and captcha flow are exempt.
   document.addEventListener('click', function (e) {
-    if (!pickerActive) return; // EXTENSION: idle → let links navigate normally
+    if (!pickerActive || window.__wrPickerOff) return; // EXTENSION: idle → let links navigate normally
     if (e.target === banner || (banner && banner.contains(e.target))) return;
     if (blockInfo) return; // captcha: let the challenge widget handle clicks
     var navAnchor = e.target && e.target.closest ? e.target.closest('a[href]') : null;
@@ -619,7 +621,7 @@
   // In selector modes: preventDefault + post a pick.
   // In action mode: observe + record, let the page handle normally.
   document.addEventListener('click', function (e) {
-    if (!pickerActive) return; // EXTENSION: idle → don't intercept page clicks
+    if (!pickerActive || window.__wrPickerOff) return; // EXTENSION: idle → don't intercept page clicks
     if (e.target === banner || banner.contains(e.target)) return;
     // When blocked by a captcha, let the page handle clicks natively
     // so the user can solve the challenge. The page won't be navigated
