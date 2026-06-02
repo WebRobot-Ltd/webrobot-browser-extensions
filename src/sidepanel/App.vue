@@ -456,27 +456,34 @@ async function runConfirm() {
   showRunModal.value = false
   running.value = true; execRows.value = null; execLogs.value = ''; execState.value = 'saving'; status.value = 'Saving…'
   try {
-    // 1) Save the built pipeline (draft) so an agent exists to run / attach to.
-    await saveGeneratedPipeline({ pipeline_name: name, pipeline_yaml: wizYaml.value, execute: false })
-    // 2) Resolve the input dataset per the chosen mode.
+    // Resolve the input dataset per mode (only when an input is actually needed).
     let datasetId = null
     if (runMode.value === 'existing') {
       datasetId = (wizDatasetId.value || '').trim() || null
     } else if (runMode.value === 'upload') {
       if (!runCsvText.value.trim()) { running.value = false; status.value = 'Paste CSV (or pick No dataset).'; return }
+      await saveGeneratedPipeline({ pipeline_name: name, pipeline_yaml: wizYaml.value, execute: false }) // draft so upload can attach
       status.value = 'Uploading dataset…'
       datasetId = (await uploadCsv(name, runCsvText.value, 'input.csv')).datasetId
-    } else { // 'none' → 1-row trigger CSV (load_csv has a row to fan out from)
-      status.value = 'Attaching trigger dataset…'
-      datasetId = (await uploadCsv(name, 'trigger\ngo\n', 'trigger.csv')).datasetId
     }
-    // 3) Execute by name.
+    // Save + execute in ONE call (wizard parity): the response carries
+    // execution.{execution_id, output_dataset_id} — the latter is what makes
+    // the output preview work (executeByName did NOT return it).
     status.value = 'Submitting…'; execState.value = 'submitting'
-    const params = { limit: 10 }; if (datasetId) params.datasetId = datasetId
-    const r = await executeByName(name, params)
-    const id = r.execution_id || (r.execution && r.execution.execution_id)
-    if (!id) { running.value = false; execState.value = 'error'; status.value = 'No execution_id: ' + (r.error || JSON.stringify(r).slice(0, 200)); return }
-    execId.value = id; outDatasetId.value = r.output_dataset_id || null
+    const body = { pipeline_name: name, pipeline_yaml: wizYaml.value, execute: true }
+    if (datasetId) body.datasetId = datasetId
+    let j = await saveGeneratedPipeline(body)
+    // 'none' on a pipeline that needs a trivial input → attach a 1-row trigger and retry.
+    if (j.execution_error && /input dataset is required/i.test(j.execution_error) && runMode.value === 'none') {
+      status.value = 'Attaching trigger dataset…'
+      const dsId = (await uploadCsv(name, 'trigger\ngo\n', 'trigger.csv')).datasetId
+      j = await saveGeneratedPipeline({ pipeline_name: name, pipeline_yaml: wizYaml.value, execute: true, datasetId: dsId })
+    }
+    if (j.execution_error) { running.value = false; execState.value = 'error'; status.value = 'Saved but execution failed: ' + j.execution_error; return }
+    const ex = j.execution || {}
+    const id = ex.execution_id || j.execution_id
+    if (!id) { running.value = false; execState.value = 'error'; status.value = 'Saved but no execution_id — check Jersey logs.'; return }
+    execId.value = id; outDatasetId.value = ex.output_dataset_id || j.output_dataset_id || null
     showExec.value = true            // open the roomy status/logs modal
     status.value = 'Running ' + id; poll()
   } catch (e) { running.value = false; execState.value = 'error'; status.value = 'Run error: ' + e.message }
