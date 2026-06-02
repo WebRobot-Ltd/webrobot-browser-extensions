@@ -463,9 +463,37 @@ async function poll() {
     execState.value = (s && (s.status || s.phase)) || 'UNKNOWN'
     const done = /SUCCEED|COMPLETE|FAIL|ERROR|KILLED/i.test(execState.value)
     try { const l = await executionLogs(execId.value); execLogs.value = (typeof l === 'string' ? l : (l.logs || JSON.stringify(l))).slice(-6000) } catch (_) {}
-    if (done) { running.value = false; if (/SUCCEED|COMPLETE/i.test(execState.value)) { try { execRows.value = asTable(await executionOutput(execId.value)) } catch (_) {} } return }
+    if (done) {
+      running.value = false
+      if (/SUCCEED|COMPLETE/i.test(execState.value)) fetchOutput()  // parquet/indexing may lag → retry
+      return
+    }
     pollTimer = setTimeout(poll, 3000)
   } catch (e) { running.value = false; execState.value = 'error'; status.value = 'Poll error: ' + e.message }
+}
+// Output preview lags the SUCCEEDED status (Spark writes parquet, Trino indexes
+// it). Retry a few times with the output dataset id until rows show up.
+async function fetchOutput(tries = 8) {
+  const dsId = outDatasetId.value || (execInfo.value && execInfo.value.output_dataset_id)
+  try {
+    const t = asTable(await executionOutput(execId.value, dsId, 10))
+    if (t && t.rows && t.rows.length) { execRows.value = t; return }
+    execRows.value = t  // keep the (empty) shape so columns can show
+  } catch (_) {}
+  if (tries > 1) { status.value = 'Job done — waiting for output rows…'; setTimeout(() => fetchOutput(tries - 1), 4000) }
+  else status.value = 'Job done. Output preview empty (dataset may still be indexing).'
+}
+// Download the current preview rows as CSV.
+function downloadCsv() {
+  const t = execRows.value; if (!t || !t.rows || !t.rows.length) return
+  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s }
+  const lines = [t.columns.map(esc).join(',')]
+  for (const r of t.rows) lines.push(t.columns.map(c => esc(r[c])).join(','))
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = (wizName.value || 'preview') + '.csv'; a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 onMounted(async () => { token.value = await getToken(); stopPick = onPick((p) => handlePick(p)); loadCatalog() })
@@ -669,7 +697,9 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
         <h4>Logs</h4>
         <pre class="logs logs-lg">{{ execLogs || '(waiting for logs…)' }}</pre>
         <template v-if="execRows && execRows.rows && execRows.rows.length">
-          <h4>Output ({{ execRows.rows.length }} rows{{ execRows.rows.length>10 ? ', showing 10' : '' }})</h4>
+          <h4>Output ({{ execRows.rows.length }} rows{{ execRows.rows.length>10 ? ', showing 10' : '' }})
+            <button class="dl" @click="downloadCsv" title="Download this preview as CSV">⬇ CSV</button>
+          </h4>
           <div class="out-scroll">
             <table class="ftab"><tr><th v-for="c in execRows.columns" :key="c">{{ c }}</th></tr>
               <tr v-for="(r, ri) in execRows.rows.slice(0,10)" :key="ri"><td v-for="c in execRows.columns" :key="c">{{ r[c] }}</td></tr></table>
@@ -772,6 +802,7 @@ h4 { margin: 8px 0 4px; }
 .modal-head .state { font-weight: 700; } .modal-head .state.ok { color: #16a34a; } .modal-head .state.bad { color: #dc2626; }
 .logs-lg { max-height: 46vh; }
 .out-scroll { max-height: 30vh; overflow: auto; }
+.dl { font-size: 11px; margin-left: 8px; font-weight: 400; }
 .exec-chip { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; border-top: 1px solid #e6e8ef; padding-top: 8px; }
 .dotst { color: #f59e0b; } .dotst.ok { color: #16a34a; } .dotst.bad { color: #dc2626; }
 .kube { background: #f7f8fc; border: 1px solid #e6e8ef; border-radius: 8px; padding: 8px; margin: 4px 0; font-size: 12px; }

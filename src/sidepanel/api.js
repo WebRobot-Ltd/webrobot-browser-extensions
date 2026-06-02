@@ -48,7 +48,9 @@ export async function uploadCsv(name, csv, filename) {
 }
 export const executionStatus   = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/status`);
 export const executionLogs     = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/logs`);
-export const executionOutput   = (id)          => get(`/demo/executions/${encodeURIComponent(id)}/output`);
+export const executionOutput   = (id, datasetId, limit = 10) =>
+  get(`/demo/executions/${encodeURIComponent(id)}/output?limit=${limit}` +
+      (datasetId != null && datasetId !== '' ? `&datasetId=${encodeURIComponent(datasetId)}` : ''));
 
 // ── token (auth) helpers ──
 export async function setToken(token) { await ext.storage.local.set({ token }); }
