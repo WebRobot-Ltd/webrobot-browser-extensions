@@ -113,7 +113,13 @@ function isHighlightArg(row, name) {
 // Tell the picker to outline every match of `sel` (+ row badges). Same channel
 // flatSelect uses in the demo app (paintRowNumbers).
 async function sendMultiConfig(sel) { try { await sendToPicker(pickTab, { type: 'webrobot-picker-multi-config', containerSelector: sel || null }) } catch (_) {} }
-const pickArg = (i, name) => beginPick({ stageIdx: i, kind: 'arg', argName: name }, 'selector-single')
+// Row/link selectors must be GENERIC (class-pattern, no :nth-of-type) so they
+// match EVERY row/link — use selector-list. Plain args stay selector-single.
+function pickArg(i, name) {
+  const row = pipeline.value[i]
+  const m = isHighlightArg(row, name) ? 'selector-list' : 'selector-single'
+  return beginPick({ stageIdx: i, kind: 'arg', argName: name }, m)
+}
 const pickArgList = (i, name) => beginPick({ stageIdx: i, kind: 'arg', argName: name }, 'multi-sample')
 async function pickFields(i) {
   await beginPick({ stageIdx: i, kind: 'field-multi' }, 'multi-field')
