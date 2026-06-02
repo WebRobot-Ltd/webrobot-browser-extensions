@@ -266,10 +266,18 @@ async function aiRelax(i) {
   } catch (e) { status.value = 'Relax failed: ' + e.message } finally { aiBusy.value = false }
 }
 async function aiNames(i) {
-  const f = pipeline.value[i]._fields || []; if (!f.length) return
+  const row = pipeline.value[i]; const f = row._fields || []
+  // Endpoint contract: body { items:[{selector,sample}], stage_name },
+  // response { fields:[{as}, …] } zipped by index to the kept items.
+  const items = f.map((x, k) => ({ _idx: k, selector: (x.selector || '').trim(), sample: (x._sample || '').slice(0, 200) }))
+                 .filter(it => it.selector)
+  if (!items.length) { status.value = 'Pick a field selector before naming.'; return }
   try {
-    const j = await suggestFieldNames({ fields: f.map(x => ({ selector: x.selector, sample: x._sample || '' })) })
-    if (Array.isArray(j.names)) j.names.forEach((n, k) => { if (f[k] && n) f[k].as = n }); touch(); status.value = 'Names suggested.'
+    const j = await suggestFieldNames({ items: items.map(it => ({ selector: it.selector, sample: it.sample })), stage_name: row.stage_name })
+    const sug = Array.isArray(j.fields) ? j.fields : []
+    if (!sug.length) { status.value = 'LLM returned no names.'; return }
+    sug.forEach((sg, k) => { const idx = items[k] && items[k]._idx; if (idx != null && f[idx] && sg.as) f[idx].as = sg.as })
+    touch(); status.value = `🏷 Suggested ${sug.length} name(s).`
   } catch (e) { status.value = 'names failed: ' + e.message }
 }
 
