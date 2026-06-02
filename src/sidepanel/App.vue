@@ -48,6 +48,8 @@ const argSchema = (n) => (specFor(n) || {}).arg_schema || []
 // ── pipeline ──
 const pipeline = ref([])
 const wizName = ref('extension-pipeline')
+const wizCategory = ref('')        // organizational category → metadata.category
+const wizDatasetId = ref('')       // optional input dataset id (load_csv pipelines)
 function addStage(s) { pipeline.value.push({ stage_name: s.stage_name, args: {}, _fields: [], _markets: [], _trace: [], _aiIntent: '', _aiBox: null }) }
 function removeStage(i) { pipeline.value.splice(i, 1) }
 function moveStage(i, d) { const j = i + d; if (j < 0 || j >= pipeline.value.length) return; const a = pipeline.value;[a[i], a[j]] = [a[j], a[i]]; pipeline.value = [...a] }
@@ -345,13 +347,14 @@ function buildYaml() {
   const meta = []
   if (wizRuntime.value && wizRuntime.value !== 'spark') meta.push(`  runtime: ${yamlScalar(wizRuntime.value)}`)
   if (wizGeo.value && /^[a-z]{2}$/i.test(wizGeo.value)) meta.push(`  geo: ${yamlScalar(wizGeo.value.toLowerCase())}`)
+  if (wizCategory.value && wizCategory.value.trim()) meta.push(`  category: ${yamlScalar(wizCategory.value.trim())}`)
   if (meta.length) { lines.push('metadata:'); meta.forEach(m => lines.push(m)) }
   return lines.join('\n')
 }
 
 // ── validate / run ──
 const validating = ref(false), running = ref(false)
-const execId = ref(''), execState = ref(''), execLogs = ref(''), execRows = ref(null)
+const execId = ref(''), execState = ref(''), execLogs = ref(''), execRows = ref(null), outDatasetId = ref(null)
 const validateRows = ref(null)   // { columns, rows } from server dry-run (Camoufox)
 const testCounts = ref(null)     // local 👁 Test counts (real page, no Camoufox)
 let pollTimer = null
@@ -407,13 +410,33 @@ async function replayTrace(i) {
   catch (e) { status.value = 'Replay error: ' + e.message }
 }
 async function run() {
-  running.value = true; execRows.value = null; execLogs.value = ''; execState.value = 'submitting'; status.value = 'Submitting…'
+  const name = (wizName.value || '').trim()
+  if (!name) { status.value = 'Give the pipeline a name first.'; return }
+  running.value = true; execRows.value = null; execLogs.value = ''; execState.value = 'saving'; status.value = 'Saving + submitting…'
   try {
-    const j = await saveGeneratedPipeline({ pipeline_name: wizName.value, pipeline_yaml: wizYaml.value, execute: true })
+    // Save the built pipeline + execute, mirroring DemoApp's wizard run:
+    // save-generated-pipeline {pipeline_name, pipeline_yaml, execute, datasetId?}
+    // → { execution:{execution_id, output_dataset_id}, execution_error? }.
+    const body = { pipeline_name: name, pipeline_yaml: wizYaml.value, execute: true }
+    if (wizDatasetId.value && wizDatasetId.value.trim()) body.datasetId = wizDatasetId.value.trim()
+    const j = await saveGeneratedPipeline(body)
+    // Backend rejected execution (most commonly: pipeline needs an input dataset).
+    if (j.execution_error) {
+      running.value = false; execState.value = 'error'
+      status.value = /input dataset is required/i.test(j.execution_error)
+        ? 'Saved, but this pipeline needs an input dataset (load_csv). Set the dataset id field, or remove the CSV step.'
+        : 'Saved but execution failed: ' + j.execution_error
+      return
+    }
     const ex = j.execution || {}
-    const id = ex.execution_id || j.execution_id || ex.id || j.id
-    if (!id) throw new Error('no execution id in response')
-    execId.value = id; status.value = 'Running ' + id; poll()
+    const id = ex.execution_id || j.execution_id
+    if (!id) {
+      running.value = false; execState.value = 'error'
+      status.value = 'Saved but no execution_id returned — check Jersey logs.'
+      return
+    }
+    execId.value = id; outDatasetId.value = ex.output_dataset_id || null
+    status.value = 'Running ' + id; poll()
   } catch (e) { running.value = false; execState.value = 'error'; status.value = 'Run error: ' + e.message }
 }
 async function poll() {
@@ -458,7 +481,11 @@ onUnmounted(() => { stopPick && stopPick(); pollTimer && clearTimeout(pollTimer)
       </section>
 
       <section class="editor">
-        <input v-model="wizName" class="name" placeholder="pipeline name" />
+        <div class="pmeta">
+          <input v-model="wizName" class="name" placeholder="pipeline name *" />
+          <input v-model="wizCategory" class="name" placeholder="category (optional)" />
+          <input v-model="wizDatasetId" class="name" placeholder="input dataset id (optional)" />
+        </div>
         <p v-if="!pipeline.length" class="muted">Click stages to build the pipeline.</p>
 
         <div v-for="(row, i) in pipeline" :key="i" class="stage">
@@ -625,6 +652,8 @@ button.rec { background: #fecaca; }
 .plist { display: flex; flex-direction: column; gap: 3px; max-height: 74vh; overflow: auto; }
 .pitem { text-align: left; font-size: 12px; }
 .editor { flex: 1; min-width: 0; }
+.pmeta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.pmeta .name { flex: 1; min-width: 120px; margin: 0; }
 .name { width: 100%; margin-bottom: 6px; font-weight: 600; }
 .stage { border: 1px solid #e6e8ef; border-radius: 8px; padding: 8px; margin-bottom: 8px; }
 .shead { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
